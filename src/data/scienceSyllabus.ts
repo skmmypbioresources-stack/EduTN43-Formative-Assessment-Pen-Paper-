@@ -11,6 +11,28 @@ export interface SyllabusTopicPreset {
 }
 
 export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
+  // BIOLOGY: Cell Structure, Organelles & Specialized Cells
+  {
+    id: 'bio-cell-structure-specialized',
+    subject: 'Biology',
+    topic: 'Cell Structure, Organelles and Specialized Cells',
+    subtopics: [
+      'Basic Cell Structures (Nucleus, Cytoplasm, Cell Membrane, Mitochondria, Ribosomes)',
+      'Plant Cell Features (Cell Wall, Large Central Vacuole, Chloroplasts)',
+      'Specialized Plant Cells: Root Hair Cells (Elongated shape for SA:V, absorption, no chloroplasts)',
+      'Specialized Animal Cells: Red Blood Cells / Erythrocytes (Biconcave disc, lack of nucleus, hemoglobin, capillary passage)',
+      'Structure-Function Relationships in Specialized Cells',
+    ],
+    learningObjectives: [
+      'Identify and describe the functions of basic cellular organelles in plant and animal cells',
+      'Explain how the structural adaptations of root hair cells increase surface area for the uptake of water and mineral ions',
+      'Explain how the structural adaptations of red blood cells (biconcave disc shape, absence of nucleus, hemoglobin) optimize oxygen transport',
+      'Compare the presence and absence of specific organelles between specialized cells and generalized cells',
+    ],
+    suggestedCriterion: 'Criterion A',
+    authenticContextSample:
+      'Microscopic examination of specialized plant (root hair cell) and mammalian blood (erythrocyte) specimens under light and electron microscopy comparing structural adaptations to specialized physiological functions.',
+  },
   // BIOLOGY: Reproduction & Menstrual Cycle
   {
     id: 'bio-reproduction-menstrual',
@@ -194,11 +216,37 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
 
 export function findSyllabusPreset(subject: Subject, topicKeyword: string): SyllabusTopicPreset | undefined {
   const clean = topicKeyword.toLowerCase().trim();
-  return SCIENCE_SYLLABUS_PRESETS.find(
-    (p) =>
-      p.subject.toLowerCase() === subject.toLowerCase() &&
-      (p.topic.toLowerCase().includes(clean) ||
-        clean.includes(p.topic.toLowerCase()) ||
-        p.subtopics.some((s) => s.toLowerCase().includes(clean) || clean.includes(s.toLowerCase())))
+  if (!clean) return undefined;
+
+  const subjectPresets = SCIENCE_SYLLABUS_PRESETS.filter(
+    (p) => p.subject.toLowerCase() === subject.toLowerCase()
+  );
+
+  // 1. Exact or near-exact topic match
+  const exactMatch = subjectPresets.find(
+    (p) => p.topic.toLowerCase() === clean || clean.includes(p.topic.toLowerCase())
+  );
+  if (exactMatch) return exactMatch;
+
+  // 2. Specific topic keyword disambiguation for Biology
+  if (subject.toLowerCase() === 'biology') {
+    if (
+      clean.includes('organelle') ||
+      clean.includes('root hair') ||
+      clean.includes('rbc') ||
+      clean.includes('red blood') ||
+      clean.includes('specialized cell') ||
+      (clean.includes('structure') && clean.includes('cell'))
+    ) {
+      return subjectPresets.find((p) => p.id === 'bio-cell-structure-specialized');
+    }
+    if (clean.includes('osmo') || clean.includes('dialysis') || clean.includes('visking') || clean.includes('water potential')) {
+      return subjectPresets.find((p) => p.id === 'bio-cell-transport');
+    }
+  }
+
+  // 3. Fallback to subtopic keyword matching
+  return subjectPresets.find((p) =>
+    p.subtopics.some((s) => s.toLowerCase().includes(clean) || clean.includes(s.toLowerCase()))
   );
 }

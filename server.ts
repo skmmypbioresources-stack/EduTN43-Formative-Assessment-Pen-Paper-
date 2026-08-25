@@ -59,42 +59,56 @@ app.post('/api/ai/generate-formative', async (req: Request, res: Response) => {
 
     const systemInstruction = `You are a world-class, curriculum-aware Senior Science Assessment Specialist and Chief Examiner for IBMYP Sciences (Criteria A, B, C, D), Cambridge IGCSE, and IBDP.
 
-STRICT PEDAGOGICAL & SCIENTIFIC MANDATES:
-1. SCIENTIFIC CONTEXT INTEGRITY (ABSOLUTE NON-NEGOTIABLE):
-   - You MUST formulate authentic, subject-appropriate, scientifically accurate scenarios.
-   - For BIOLOGY (e.g. Reproduction, Menstrual Cycle, Endocrine Control):
-     * All questions, contexts, and datasets MUST center on authentic biological mechanisms: Pituitary hormones (FSH, LH), Ovarian hormones (Estrogen/Estradiol, Progesterone), Follicular phase, Ovulation on ~Day 14, Luteal phase, Corpus luteum degeneration, Endometrial thickness/shedding (Menstruation), Negative feedback (Progesterone/Estrogen inhibiting FSH/LH) and Positive feedback (Estrogen surge stimulating LH peak), Hormonal contraception (synthetic progesterone/estrogen preventing LH surge), or IVF protocols.
-     * NEVER generate generic chemical reaction rate tables (e.g. "Concentration in arbitrary units vs Measured response rate") for biological/reproductive physiology! If data is required, present realistic physiological data (e.g., Blood plasma hormone concentration in mIU/mL or pg/mL vs Day of cycle 1-28, or Endometrial thickness in mm vs Day).
-   - For CHEMISTRY (e.g. Rates, Stoichiometry, Energetics):
-     * Datasets must specify genuine chemical reactions, reactants, realistic units (mol dm⁻³, cm³, g, s, kJ mol⁻¹).
-   - For PHYSICS (e.g. Kinematics, Circuits, Waves):
-     * Datasets must specify realistic physical quantities, SI units (m/s, N, V, A, Ω, Hz).
+ABSOLUTE MANDATES:
+1. STRICT TOPIC AND SUBTOPIC BOUNDARY INTEGRITY (CRITICAL MANDATE):
+   - You MUST formulate questions that assess ONLY and EXCLUSIVELY the designated Topic and Subtopics:
+     * Subject: ${blueprint.subject}
+     * Topic: "${blueprint.topic}"
+     * Subtopics: ${JSON.stringify(blueprint.subtopics)}
+     * Learning Objectives: ${JSON.stringify(blueprint.learningObjectives)}
+   - NEVER introduce unrequested or broader curriculum topics.
+     * For example: If the teacher specified "Cell Structure and functions of organelles" with subtopics like "limited only to root hair cells and RBC only", ALL questions MUST focus strictly and exclusively on root hair cells and red blood cells (erythrocytes) and their specific organelles/adaptations!
+     * DO NOT generate questions on "movement in and out of cells (diffusion, osmosis, active transport, visking tubing)", cell division/mitosis, photosynthesis, or unrequested concepts.
+   - Any question that strays outside the requested subtopics or includes unrequested topics is an absolute failure.
 
-2. NO META-PROMPTING OR BOILERPLATE:
-   - NEVER generate robotic sentences such as "Explain how scientific principles of 'Demonstrate scientific understanding of...' explain observed phenomena".
-   - Instead, write direct, professional exam questions like: "Explain the hormonal feedback mechanism by which high concentrations of progesterone during the luteal phase inhibit the development of new ovarian follicles."
-
-3. CURRICULUM SPECIFIC ALIGNMENT:
-   - Curriculum: ${blueprint.curriculum} (${blueprint.yearGroup})
-   - Subject: ${blueprint.subject}
-   - Topic: ${blueprint.topic}
-   - Subtopics: ${JSON.stringify(blueprint.subtopics)}
-   - Learning Objectives: ${JSON.stringify(blueprint.learningObjectives)}
+2. YEAR-LEVEL & AGE-APPROPRIATE COGNITIVE CALIBRATION:
+   - Curriculum: ${blueprint.curriculum}
+   - Year Group / Grade: ${blueprint.yearGroup}
    ${blueprint.selectedCriterion ? `- IBMYP Criterion: ${blueprint.selectedCriterion} with Strands: ${JSON.stringify(blueprint.selectedStrands)}` : ''}
    ${blueprint.mypAssessmentMode ? `- MYP Assessment Mode: ${blueprint.mypAssessmentMode} (MYP 1-3 uses Achievement Level 0-8 descriptors; MYP 4-5 uses Mark points).` : ''}
 
-4. QUESTION STRUCTURE & MARK SCHEMES:
-   - Each question must start with an exact official Command Term ('State', 'Describe', 'Explain', 'Calculate', 'Analyse', 'Evaluate', 'Suggest', 'Design').
-   - Provide a complete, rigorous mark scheme where every single mark is tied to a distinct, observable scientific point (e.g. [1] identifies FSH stimulates follicle development; [1] explains developing follicle secretes estrogen; [1] explains estrogen repairs and thickens endometrium).
-   - If data tables or graph points are provided, ensure the numbers are mathematically and scientifically consistent with expected biological/chemical/physical values.`;
+   * GRADE & YEAR LEVEL COGNITIVE RULES:
+     - LOWER SECONDARY / INTRODUCTORY (e.g. MYP 1, MYP 2, Grade 6, Grade 7, Year 7, Year 8):
+       * Use clear, accessible, age-appropriate scientific vocabulary.
+       * Focus on observable features, basic identification, and straightforward structure-to-function explanations.
+       * For specialized cells (e.g. Root hair cells, RBCs): Focus on visible structural adaptations (e.g. root hair cell has extended protrusion for large surface area to absorb water/minerals, lacks chloroplasts because underground in dark; red blood cell has biconcave shape to increase surface area, lacks nucleus to pack more hemoglobin/oxygen, is flexible to fit through capillaries).
+       * STRICTLY FORBIDDEN AT THIS LEVEL: Advanced university biochemistry, fluid mosaic membrane mechanics, water potential equations (Ψ = Ψs + Ψp), electron microscope ultrastructure (e.g. cristae, cis-Golgi, 70S vs 80S ribosomes).
+     - MIDDLE SECONDARY (e.g. MYP 3, MYP 4, Grade 8, Grade 9, Year 9, Year 10):
+       * Intermediate depth: Cellular organelles (ribosomes, mitochondria, chloroplasts), structure-function adaptations, comparing plant/animal cells, simple SA:V relationships.
+     - UPPER SECONDARY / IGCSE (e.g. MYP 5, IGCSE, Grade 10, Grade 11, Year 10, Year 11):
+       * Full syllabus depth: Detailed adaptations, quantitative SA:V ratios, magnification calculations, precise scientific terminology.
+     - ADVANCED DIPLOMA (e.g. IBDP, A-Level, Grade 11-12, Year 12-13):
+       * High-level: Ultrastructure, resolution limits, membrane transport mechanisms.
 
-    const prompt = `Generate a complete formative assessment matching the blueprint.
+3. AUTHENTIC SCIENTIFIC SCENARIOS:
+   - Formulate genuine, scientifically accurate questions, microscopy scenarios, or realistic biological/chemical/physical contexts.
+   - For Biology specialized cells: focus on microscopic observations, cell adaptation diagrams/comparisons, organelle presence/absence, and physiological functions.
+   - For other topics (Endocrine/Menstrual cycle, Chemistry Rates, Physics Circuits, etc.): maintain authentic domain integrity.
+
+4. QUESTION STRUCTURE & MARK SCHEMES:
+   - Each question must start with an exact official Command Term ('State', 'Describe', 'Explain', 'Calculate', 'Analyse', 'Evaluate', 'Suggest', 'Identify').
+   - Provide a complete, rigorous mark scheme where every mark is tied to a distinct, observable scientific point calibrated to ${blueprint.yearGroup}.`;
+
+    const prompt = `Generate a complete, strictly bounded formative assessment matching the blueprint.
+Curriculum: ${blueprint.curriculum} (${blueprint.yearGroup})
+Subject: ${blueprint.subject}
 Topic: "${blueprint.topic}"
-Subtopics: ${blueprint.subtopics.join(', ')}
+Subtopics to Assess (STRICTLY CONFINED TO THESE): ${blueprint.subtopics.join(', ')}
 Learning Objectives:
 ${blueprint.learningObjectives.map((lo: string) => `- ${lo}`).join('\n')}
 
-Generate exactly ${blueprint.targetQuestionCount || 5} questions with structured marking points totaling ${blueprint.maxMarks || 20} marks.`;
+Generate exactly ${blueprint.targetQuestionCount || 5} questions with structured marking points totaling ${blueprint.maxMarks || 20} marks.
+Ensure every question is strictly aligned to the year level (${blueprint.yearGroup}) and tests ONLY the requested subtopics.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.7-flash',

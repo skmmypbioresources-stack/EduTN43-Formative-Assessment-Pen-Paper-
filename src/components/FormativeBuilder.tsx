@@ -132,25 +132,30 @@ export const FormativeBuilder: React.FC<FormativeBuilderProps> = ({
     const generatedTitle = title.trim() || `${formativeNumber} — ${topic.trim() || subject}`;
     const matchedPreset = findSyllabusPreset(subject, topic.trim());
 
-    // Resolve intelligent learning objectives
-    let resolvedLOs = learningObjectives;
-    if (resolvedLOs.length === 0) {
-      if (matchedPreset && matchedPreset.learningObjectives.length > 0) {
-        resolvedLOs = matchedPreset.learningObjectives;
-      } else {
-        resolvedLOs = [
-          `Explain the scientific mechanisms, underlying principles, and key variables governing ${topic.trim() || subject}`,
-          `Analyze quantitative experimental data and evaluate theoretical models for ${topic.trim() || subject}`,
-        ];
-      }
-    }
-
     let resolvedSubtopics = subtopics;
     if (resolvedSubtopics.length === 0) {
       if (matchedPreset && matchedPreset.subtopics.length > 0) {
         resolvedSubtopics = matchedPreset.subtopics;
       } else {
         resolvedSubtopics = [topic.trim()];
+      }
+    }
+
+    // Resolve intelligent learning objectives strictly aligned to teacher's subtopics & topic
+    let resolvedLOs = learningObjectives;
+    if (resolvedLOs.length === 0) {
+      if (subtopics.length > 0) {
+        // Teacher specified custom subtopics (e.g. "Root hair cells and RBC only")
+        resolvedLOs = subtopics.map(
+          (st) => `Demonstrate scientific understanding of ${st} in relation to ${topic.trim()}`
+        );
+      } else if (matchedPreset && matchedPreset.learningObjectives.length > 0) {
+        resolvedLOs = matchedPreset.learningObjectives;
+      } else {
+        resolvedLOs = [
+          `Explain the scientific mechanisms, structures, and key principles governing ${topic.trim() || subject}`,
+          `Analyze structure-function relationships and scientific data for ${topic.trim() || subject}`,
+        ];
       }
     }
 

@@ -195,36 +195,180 @@ export class GeminiService {
     validationPassed: boolean;
   } {
     const topicLower = (blueprint.topic || '').toLowerCase();
+    const subtopicsLower = (blueprint.subtopics || []).map((s) => s.toLowerCase()).join(' ');
+    const combinedScope = `${topicLower} ${subtopicsLower}`;
+    const yearLower = (blueprint.yearGroup || '').toLowerCase();
+    const isLowerSecondary =
+      yearLower.includes('myp 1') ||
+      yearLower.includes('myp 2') ||
+      yearLower.includes('year 7') ||
+      yearLower.includes('year 8') ||
+      yearLower.includes('grade 6') ||
+      yearLower.includes('grade 7');
+
+    const isSpecializedCellsOrOrganelles =
+      combinedScope.includes('root hair') ||
+      combinedScope.includes('rbc') ||
+      combinedScope.includes('red blood') ||
+      combinedScope.includes('organelle') ||
+      combinedScope.includes('specialized cell') ||
+      combinedScope.includes('cell structure') ||
+      combinedScope.includes('plant and animal cell');
+
     const isReproduction =
-      topicLower.includes('reproduct') ||
-      topicLower.includes('menstrua') ||
-      topicLower.includes('hormon') ||
-      topicLower.includes('fertili') ||
-      topicLower.includes('ovulat');
+      combinedScope.includes('reproduct') ||
+      combinedScope.includes('menstrua') ||
+      combinedScope.includes('hormon') ||
+      combinedScope.includes('fertili') ||
+      combinedScope.includes('ovulat');
 
     const isOsmosis =
-      topicLower.includes('osmo') ||
-      topicLower.includes('diffus') ||
-      topicLower.includes('transport') ||
-      topicLower.includes('cell');
+      !isSpecializedCellsOrOrganelles &&
+      (combinedScope.includes('osmo') ||
+        combinedScope.includes('water potential') ||
+        combinedScope.includes('dialysis') ||
+        combinedScope.includes('visking') ||
+        combinedScope.includes('diffus') ||
+        combinedScope.includes('transport across'));
 
     const isEnzyme =
-      topicLower.includes('enzyme') ||
-      topicLower.includes('cataly') ||
-      topicLower.includes('substra');
-
-    const isChemistry =
-      blueprint.subject === 'Chemistry' ||
-      topicLower.includes('rate') ||
-      topicLower.includes('react') ||
-      topicLower.includes('titrat') ||
-      topicLower.includes('mole') ||
-      topicLower.includes('acid');
+      combinedScope.includes('enzyme') ||
+      combinedScope.includes('cataly') ||
+      combinedScope.includes('substra');
 
     const count = blueprint.targetQuestionCount || 4;
     const questions: Question[] = [];
 
-    if (isReproduction) {
+    if (isSpecializedCellsOrOrganelles) {
+      // Specialized Cells: Root Hair Cells & Red Blood Cells / Organelles (Calibrated to Year Level)
+      // 1. MCQ - RBC Structural Adaptations
+      questions.push({
+        id: `q-${Date.now()}-1`,
+        questionNumber: 1,
+        type: 'mcq',
+        commandTerm: 'Identify',
+        prompt: 'Which structural adaptation allows mature mammalian red blood cells (erythrocytes) to maximize the amount of oxygen they can transport?',
+        options: [
+          {
+            id: 'A',
+            text: 'Absence of a nucleus to provide maximum internal volume for hemoglobin',
+            isCorrect: true,
+          },
+          {
+            id: 'B',
+            text: 'Presence of numerous chloroplasts to generate oxygen internally',
+            isCorrect: false,
+            misconceptionExplanation: 'Chloroplasts are photosynthetic plant organelles, not found in animal blood cells.',
+          },
+          {
+            id: 'C',
+            text: 'A rigid cellulose cell wall to prevent bursting under high pressure',
+            isCorrect: false,
+            misconceptionExplanation: 'Cell walls are unique to plant, fungal, and bacterial cells; animal cells lack cell walls.',
+          },
+          {
+            id: 'D',
+            text: 'A long hair-like protrusion to increase soil contact surface area',
+            isCorrect: false,
+            misconceptionExplanation: 'A hair-like extension is the specific adaptation of plant root hair cells.',
+          },
+        ],
+        maxMarks: 1,
+        cognitiveDemand: 'Recall',
+        learningObjective: 'Identify the structural adaptations of red blood cells for oxygen transport',
+        criterion: blueprint.selectedCriterion || 'Criterion A',
+        strands: blueprint.selectedStrands,
+        expectedAnswer: 'A',
+        markScheme: {
+          points: [{ id: 'mp-1-1', point: 'Correctly identifies absence of nucleus to maximize hemoglobin packaging (Option A)', marks: 1 }],
+        },
+      });
+
+      // 2. Structured Explanation - Root Hair Cell Structure and Organelle Absence
+      questions.push({
+        id: `q-${Date.now()}-2`,
+        questionNumber: 2,
+        type: 'extended_response',
+        commandTerm: 'Explain',
+        prompt: 'Explain how the elongated shape of a root hair cell adapts it for its primary function. Additionally, explain why root hair cells do NOT contain chloroplasts, unlike leaf palisade cells.',
+        maxMarks: 4,
+        cognitiveDemand: 'Understanding',
+        learningObjective: 'Explain structure-function relationships in root hair cells and justify organelle presence/absence',
+        criterion: blueprint.selectedCriterion || 'Criterion A',
+        strands: blueprint.selectedStrands,
+        expectedAnswer: 'The elongated extension of the root hair cell provides a large surface area in contact with soil particles, allowing for rapid and efficient absorption of water and mineral ions from the soil. Root hair cells grow underground in soil where no sunlight penetrates; because chloroplasts require light energy to carry out photosynthesis, chloroplasts are not needed in subterranean root cells.',
+        markScheme: {
+          points: [
+            { id: 'mp-2-1', point: 'Long extension / hair-like protrusion significantly increases surface area (to volume ratio)', marks: 1 },
+            { id: 'mp-2-2', point: 'Increased surface area facilitates efficient / rapid uptake of water and dissolved mineral ions', marks: 1 },
+            { id: 'mp-2-3', point: 'Root hair cells are located underground / in the dark where there is no sunlight', marks: 1 },
+            { id: 'mp-2-4', point: 'Chloroplasts absorb light for photosynthesis, so they are not needed in non-photosynthetic underground roots', marks: 1 },
+          ],
+        },
+      });
+
+      // 3. Comparative Organelle Analysis
+      questions.push({
+        id: `q-${Date.now()}-3`,
+        questionNumber: 3,
+        type: 'data_based',
+        commandTerm: 'Analyse',
+        prompt: 'Analyze the cellular structural profile in Table 1. Deduce which cell (Cell X, Cell Y, or Cell Z) is a Root Hair Cell and which is a Red Blood Cell. Justify your deductions by comparing two distinct structural features for each cell.',
+        context: 'A biology student examined three unknown specialized cell specimens under a compound microscope and recorded the presence (+) or absence (-) of specific organelles and cellular components.',
+        dataset: {
+          title: 'Table 1: Organelle and Component Profiles of Unknown Cells X, Y, and Z',
+          description: 'Microscopic observation record (+ = Present, - = Absent).',
+          xLabel: 'Cell Type',
+          xUnit: 'Specimen',
+          yLabel: 'Component Count',
+          yUnit: 'Structures',
+          dataPoints: [
+            { x: 'Nucleus', y: 2, trial1: 1, trial2: 1, trial3: 0, mean: 0.67 },
+            { x: 'Cell Wall', y: 2, trial1: 1, trial2: 1, trial3: 0, mean: 0.67 },
+            { x: 'Cell Membrane', y: 3, trial1: 1, trial2: 1, trial3: 1, mean: 1.0 },
+            { x: 'Chloroplasts', y: 1, trial1: 1, trial2: 0, trial3: 0, mean: 0.33 },
+            { x: 'Hemoglobin', y: 1, trial1: 0, trial2: 0, trial3: 1, mean: 0.33 },
+          ],
+        },
+        maxMarks: 4,
+        cognitiveDemand: 'Analysis',
+        learningObjective: 'Compare the presence and absence of organelles across specialized plant and animal cells',
+        criterion: blueprint.selectedCriterion || 'Criterion A',
+        strands: blueprint.selectedStrands,
+        expectedAnswer: 'Cell Y is the Root Hair Cell because it possesses a plant cell wall, cell membrane, and nucleus, but lacks chloroplasts (as it is underground). Cell Z is the Red Blood Cell because it contains hemoglobin, lacks a cell wall (animal cell), and lacks a nucleus (anucleated at maturity for oxygen transport).',
+        markScheme: {
+          points: [
+            { id: 'mp-3-1', point: 'Correctly identifies Cell Y as the Root Hair Cell', marks: 1 },
+            { id: 'mp-3-2', point: 'Justifies Cell Y: possesses a cell wall and nucleus but lacks chloroplasts', marks: 1 },
+            { id: 'mp-3-3', point: 'Correctly identifies Cell Z as the Red Blood Cell (erythrocyte)', marks: 1 },
+            { id: 'mp-3-4', point: 'Justifies Cell Z: contains hemoglobin, has no cell wall, and lacks a nucleus', marks: 1 },
+          ],
+        },
+      });
+
+      // 4. Physical Adaptation & Function
+      questions.push({
+        id: `q-${Date.now()}-4`,
+        questionNumber: 4,
+        type: 'extended_response',
+        commandTerm: 'Describe',
+        prompt: 'Describe the biconcave disc shape and flexible membrane of a red blood cell. Explain how both of these physical adaptations directly help red blood cells travel through narrow capillaries and deliver oxygen efficiently.',
+        maxMarks: 4,
+        cognitiveDemand: 'Application',
+        learningObjective: 'Apply structure-function concepts to capillary transit and gas exchange in red blood cells',
+        criterion: blueprint.selectedCriterion || 'Criterion A',
+        strands: blueprint.selectedStrands,
+        expectedAnswer: 'The biconcave shape (indented on both sides) provides a higher surface area to volume ratio than a sphere, shortening diffusion distance and speeding up oxygen uptake and release. The flexible cell membrane allows red blood cells to deform and squeeze single-file through narrow capillary blood vessels (often narrower than the cell diameter) without rupturing, ensuring close contact with capillary walls for gas exchange.',
+        markScheme: {
+          points: [
+            { id: 'mp-4-1', point: 'Biconcave shape provides a high surface area to volume ratio for rapid gas exchange', marks: 1 },
+            { id: 'mp-4-2', point: 'Reduces diffusion distance for oxygen entering and exiting the cell', marks: 1 },
+            { id: 'mp-4-3', point: 'Flexible cell membrane allows cell to bend / squeeze through narrow capillaries', marks: 1 },
+            { id: 'mp-4-4', point: 'Prevents capillary blockage and ensures close proximity to tissue cells for efficient oxygen transfer', marks: 1 },
+          ],
+        },
+      });
+    } else if (isReproduction) {
       // 1. MCQ or Knowledge recall on Hormones
       questions.push({
         id: `q-${Date.now()}-1`,
