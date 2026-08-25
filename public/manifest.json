@@ -1,0 +1,38 @@
+{
+  "name": "FormativeIQ - Science Assessment & Faculty Portal",
+  "short_name": "FormativeIQ",
+  "description": "Desktop assessment app with strict lockdown mode, copy-paste defense, authentic science datasets, and AI diagnostic feedback.",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "scope": "/",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512 any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Take Assessment",
+      "short_name": "Assessments",
+      "description": "Open student interactive assessment portal",
+      "url": "/?tab=dashboard",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Create Formative",
+      "short_name": "Create",
+      "description": "Create a new formative assessment",
+      "url": "/?tab=builder",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    }
+  ]
+}

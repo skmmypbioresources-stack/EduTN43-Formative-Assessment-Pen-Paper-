@@ -1,0 +1,6 @@
+{
+  "name": "Formative Assessment & Learning Diagnosis Platform",
+  "description": "Academically rigorous, curriculum-aware formative assessment and learning-gap diagnosis platform supporting IBMYP, IGCSE, and IBDP with strict AI examiner marking, student reflections, and targeted reassessments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
