@@ -20,6 +20,10 @@ import {
   Lock,
   Image as ImageIcon,
   ZoomIn,
+  Send,
+  Save,
+  Check,
+  ExternalLink,
 } from 'lucide-react';
 import { QuestionImageEditor } from './QuestionImageEditor';
 import { ImageLightboxModal } from './ImageLightboxModal';
@@ -28,6 +32,7 @@ interface AssessmentReviewProps {
   assessment: FormativeAssessment;
   onUpdateAssessment: (updated: FormativeAssessment) => void;
   onSaveDraft: (assessment: FormativeAssessment) => void;
+  onPublish: (assessment: FormativeAssessment) => void;
   onPreviewStudentMode: () => void;
   onBack: () => void;
 }
@@ -36,6 +41,7 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
   assessment,
   onUpdateAssessment,
   onSaveDraft,
+  onPublish,
   onPreviewStudentMode,
   onBack,
 }) => {
@@ -44,6 +50,10 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
   const [editedPrompt, setEditedPrompt] = useState<string>('');
   const [editedExpectedAnswer, setEditedExpectedAnswer] = useState<string>('');
   const [editedMarks, setEditedMarks] = useState<number>(2);
+
+  // Publish state & modal
+  const [showPublishSuccessModal, setShowPublishSuccessModal] = useState<boolean>(false);
+  const [savedDraftToast, setSavedDraftToast] = useState<boolean>(false);
 
   // Question Image Editor State
   const [imageEditorQuestion, setImageEditorQuestion] = useState<Question | null>(null);
@@ -183,8 +193,29 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
     setCustomQuestionImageData(null);
   };
 
+  // Handle publishing assessment to make it live for students
+  const handlePublish = () => {
+    const published: FormativeAssessment = {
+      ...currentAssessment,
+      status: 'Published',
+      publishedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setCurrentAssessment(published);
+    onUpdateAssessment(published);
+    onPublish(published);
+    setShowPublishSuccessModal(true);
+  };
+
+  const handleSaveDraftClick = () => {
+    onSaveDraft(currentAssessment);
+    setSavedDraftToast(true);
+    setTimeout(() => setSavedDraftToast(false), 3000);
+  };
+
   // Calculate total marks
   const totalCalculatedMarks = currentAssessment.questions.reduce((sum, q) => sum + q.maxMarks, 0);
+  const isPublished = currentAssessment.status === 'Published';
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
@@ -192,8 +223,20 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 uppercase tracking-wide">
-              {currentAssessment.status.toUpperCase()} DRAFT
+            <span
+              className={`px-2.5 py-0.5 rounded-full text-xs font-bold border uppercase tracking-wide flex items-center gap-1 ${
+                isPublished
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                  : 'bg-amber-100 text-amber-800 border-amber-200'
+              }`}
+            >
+              {isPublished ? (
+                <>
+                  <CheckCircle2 className="w-3 h-3 text-emerald-700" /> LIVE & PUBLISHED
+                </>
+              ) : (
+                'DRAFT (NOT YET PUBLISHED)'
+              )}
             </span>
             <span className="text-xs text-slate-500 font-medium">
               Curriculum: <strong>{bp.curriculum}</strong> | Section: <strong>{bp.classSection}</strong>
@@ -214,17 +257,37 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
           </button>
 
           <button
+            onClick={handleSaveDraftClick}
+            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition-colors flex items-center gap-1"
+            title="Save changes to draft without publishing"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {savedDraftToast ? 'Draft Saved!' : 'Save Draft'}
+          </button>
+
+          <button
             onClick={() => setShowAddCustomModal(true)}
             className="px-3.5 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg flex items-center gap-1.5 transition-colors"
           >
-            <Plus className="w-4 h-4" /> Add Custom Question
+            <Plus className="w-4 h-4" /> Add Question
           </button>
 
           <button
             onClick={onPreviewStudentMode}
-            className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 shadow-xs transition-colors"
+            className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg flex items-center gap-1.5 transition-colors"
+            title="Preview how students will experience this assessment"
           >
-            <Play className="w-4 h-4" /> Launch Student Runner
+            <Play className="w-3.5 h-3.5 text-slate-700" /> Student Preview
+          </button>
+
+          {/* PRIMARY PUBLISH TO CLASS BUTTON */}
+          <button
+            type="button"
+            onClick={handlePublish}
+            className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-lg flex items-center gap-2 shadow-md hover:shadow-lg transition-all ring-2 ring-emerald-500/30"
+          >
+            <Send className="w-4 h-4" />
+            <span>{isPublished ? 'Update Published Task' : `Publish to Class (${bp.classSection})`}</span>
           </button>
         </div>
       </div>
@@ -715,6 +778,136 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
           imageAlt={lightboxAlt}
           onClose={() => setLightboxImageUrl(null)}
         />
+      )}
+
+      {/* Sticky Bottom Actions Bar */}
+      <div className="sticky bottom-4 z-20 bg-slate-900/95 backdrop-blur-md text-white border border-slate-700 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+            <Send className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-sm font-bold text-white flex items-center gap-2">
+              Ready to assign to {bp.classSection}?
+              {isPublished && (
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                  Live for Students
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400">
+              {isPublished
+                ? `Students in ${bp.classSection} can currently see and complete this task on their dashboard.`
+                : `Publishing makes this formative assessment instantly visible on all ${bp.classSection} student dashboards.`}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          <button
+            type="button"
+            onClick={handleSaveDraftClick}
+            className="px-4 py-2.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl transition-colors flex items-center gap-1.5"
+          >
+            <Save className="w-4 h-4" />
+            {savedDraftToast ? 'Draft Saved!' : 'Save Draft'}
+          </button>
+
+          <button
+            type="button"
+            onClick={onPreviewStudentMode}
+            className="px-4 py-2.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl transition-colors flex items-center gap-1.5"
+          >
+            <Play className="w-4 h-4 text-emerald-400" />
+            Student Preview
+          </button>
+
+          <button
+            type="button"
+            onClick={handlePublish}
+            className="px-6 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 rounded-xl shadow-lg hover:shadow-emerald-500/25 flex items-center gap-2 transition-all ring-2 ring-emerald-400/40"
+          >
+            <Send className="w-4 h-4" />
+            <span>{isPublished ? 'Update Live Assessment' : `Publish to Class (${bp.classSection})`}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* PUBLISH SUCCESS MODAL */}
+      {showPublishSuccessModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-7 h-7" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  Published & Live
+                </span>
+                <h3 className="text-lg font-bold text-slate-900 mt-1">
+                  Assessment Published to Students!
+                </h3>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-xs text-slate-700">
+              <div className="flex justify-between py-1 border-b border-slate-200">
+                <span className="text-slate-500">Assessment Title:</span>
+                <span className="font-bold text-slate-900">{bp.title}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-200">
+                <span className="text-slate-500">Assigned Class Section:</span>
+                <span className="font-bold text-blue-700">{bp.classSection}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-200">
+                <span className="text-slate-500">Subject & Topic:</span>
+                <span className="font-medium text-slate-800">{bp.subject} • {bp.topic}</span>
+              </div>
+              <div className="flex justify-between py-1">
+                <span className="text-slate-500">Total Questions & Marks:</span>
+                <span className="font-medium text-slate-800">{currentAssessment.questions.length} Questions ({totalCalculatedMarks} Marks)</span>
+              </div>
+            </div>
+
+            <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-900 flex items-start gap-2.5">
+              <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold">Student Access Active:</span> Students in <strong>{bp.classSection}</strong> can now view and start this formative task directly from their Student Dashboard under <strong>{bp.subject}</strong>.
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPublishSuccessModal(false)}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                Keep Editing
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPublishSuccessModal(false);
+                  onPreviewStudentMode();
+                }}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Play className="w-3.5 h-3.5" /> Test as Student
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPublishSuccessModal(false);
+                  onBack();
+                }}
+                className="w-full sm:w-auto px-5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+              >
+                Back to Dashboard &rarr;
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
