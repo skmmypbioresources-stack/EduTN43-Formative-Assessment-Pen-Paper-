@@ -1,10 +1,46 @@
 import { FormativeBlueprint, FormativeAssessment, Question, StudentResponse, Submission } from '../types';
 
+async function parseErrorResponse(response: Response): Promise<string> {
+  try {
+    const rawText = await response.text();
+    try {
+      const parsed = JSON.parse(rawText);
+      if (parsed.error) {
+        if (typeof parsed.error === 'string' && parsed.error.includes('{')) {
+          try {
+            const inner = JSON.parse(parsed.error);
+            return inner.error?.message || inner.message || parsed.error;
+          } catch {
+            return parsed.error;
+          }
+        }
+        if (typeof parsed.error === 'object' && parsed.error.message) {
+          return parsed.error.message;
+        }
+        return parsed.error;
+      }
+      if (parsed.message) return parsed.message;
+    } catch {
+      // not json
+    }
+    if (response.status === 503) {
+      return 'The AI service is experiencing a temporary capacity spike. Please try again in a few moments.';
+    }
+    return rawText || `Server returned error status ${response.status}`;
+  } catch {
+    return `Server returned error status ${response.status}`;
+  }
+}
+
 export class GeminiService {
   /**
    * Generates a complete formative assessment from the teacher-configured blueprint
    */
-  static async generateFormative(blueprint: FormativeBlueprint): Promise<{
+  static async generateFormative(
+    blueprint: FormativeBlueprint,
+    teacherInstructions?: string,
+    previousQuestions?: string[]
+  ): Promise<{
     title: string;
     questions: Question[];
     validationPassed: boolean;
@@ -13,15 +49,24 @@ export class GeminiService {
       const response = await fetch('/api/ai/generate-formative', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blueprint }),
+        body: JSON.stringify({
+          blueprint,
+          teacherInstructions: teacherInstructions?.trim() || undefined,
+          previousQuestions: previousQuestions || undefined,
+        }),
       });
 
       if (!response.ok) {
-        throw new Error(`Server returned ${response.status}: ${await response.text()}`);
+        throw new Error(await parseErrorResponse(response));
       }
 
       const data = await response.json();
-      const generatedQuestions: Question[] = (data.questions || []).map((q: any, idx: number) => ({
+      const isMYP =
+        (blueprint.curriculum || '').toUpperCase().includes('MYP') ||
+        ((blueprint.curriculum || '').toUpperCase().includes('IB') &&
+          !(blueprint.curriculum || '').toUpperCase().includes('DP'));
+
+      const rawQuestions: Question[] = (data.questions || []).map((q: any, idx: number) => ({
         id: `q-gen-${Date.now()}-${idx + 1}`,
         questionNumber: q.questionNumber || idx + 1,
         type: q.type || 'short_answer',
@@ -32,24 +77,222 @@ export class GeminiService {
         options: q.options,
         maxMarks: q.maxMarks || 2,
         cognitiveDemand: q.cognitiveDemand || 'Application',
-        learningObjective: q.learningObjective || blueprint.learningObjectives[0] || blueprint.topic,
-        criterion: blueprint.selectedCriterion,
-        strands: blueprint.selectedStrands,
+        learningObjective: q.learningObjective || blueprint.learningObjectives?.[0] || blueprint.topic,
+        criterion: isMYP ? (q.criterion || blueprint.selectedCriterion) : undefined,
+        strands: isMYP ? (q.strands || blueprint.selectedStrands) : undefined,
         expectedAnswer: q.expectedAnswer || '',
         markScheme: q.markScheme || {
           points: [{ id: `mp-${idx}-1`, point: 'Accurate scientific answer demonstrated', marks: q.maxMarks || 2 }],
         },
       }));
 
+      // Strictly calibrate and guarantee exact marks and question count
+      const calibratedQuestions = this.calibrateAndEnforceAssessmentMarks(rawQuestions, blueprint);
+
       return {
         title: data.assessmentTitle || blueprint.title,
-        questions: generatedQuestions,
+        questions: calibratedQuestions,
         validationPassed: data.validationSummary?.topicBoundaryCompliant ?? true,
       };
     } catch (error) {
       console.warn('Gemini API call failed, generating calibrated curriculum questions:', error);
       // Fallback calibrated curriculum builder
       return this.fallbackGenerateFormative(blueprint);
+    }
+  }
+
+  /**
+   * Regenerates a single question tailored to topic, learning objective, difficulty level, and marks
+   */
+  static async regenerateSingleQuestion(
+    blueprint: FormativeBlueprint,
+    existingQuestion: Question,
+    teacherGuidance?: string
+  ): Promise<Question> {
+    try {
+      const response = await fetch('/api/ai/regenerate-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blueprint, existingQuestion, teacherGuidance }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await parseErrorResponse(response));
+      }
+
+      const data = await response.json();
+      const q = data.question;
+      if (!q || !q.prompt) {
+        throw new Error('Invalid question generated from server');
+      }
+
+      const targetMarks = existingQuestion.maxMarks || 2;
+      let points = q.markScheme?.points || [];
+      if (points.length === 0) {
+        points = [{ id: `mp-${existingQuestion.questionNumber}-1`, point: q.expectedAnswer || 'Accurate scientific answer demonstrated', marks: targetMarks }];
+      }
+
+      // Ensure points match marks
+      let pointSum = points.reduce((s: number, p: any) => s + (p.marks || 1), 0);
+      if (pointSum !== targetMarks) {
+        points = points.slice(0, targetMarks);
+        while (points.length < targetMarks) {
+          points.push({
+            id: `mp-${existingQuestion.questionNumber}-${points.length + 1}`,
+            point: `Clear scientific justification and terminology matching ${existingQuestion.commandTerm}`,
+            marks: 1,
+          });
+        }
+      }
+
+      const isMYP =
+        (blueprint.curriculum || '').toUpperCase().includes('MYP') ||
+        ((blueprint.curriculum || '').toUpperCase().includes('IB') &&
+          !(blueprint.curriculum || '').toUpperCase().includes('DP'));
+
+      return {
+        id: `q-regen-${Date.now()}`,
+        questionNumber: existingQuestion.questionNumber,
+        type: q.type || existingQuestion.type,
+        commandTerm: q.commandTerm || existingQuestion.commandTerm,
+        prompt: q.prompt,
+        context: q.context,
+        dataset: q.dataset,
+        options: q.options,
+        imageUrl: existingQuestion.imageUrl,
+        imageCaption: existingQuestion.imageCaption,
+        imageAlt: existingQuestion.imageAlt,
+        maxMarks: targetMarks,
+        cognitiveDemand: q.cognitiveDemand || existingQuestion.cognitiveDemand,
+        difficultyLevel: blueprint.difficultyLevel || existingQuestion.difficultyLevel,
+        learningObjective: q.learningObjective || existingQuestion.learningObjective,
+        criterion: isMYP ? (q.criterion || existingQuestion.criterion) : undefined,
+        strands: isMYP ? (q.strands || existingQuestion.strands) : undefined,
+        expectedAnswer: q.expectedAnswer || '',
+        markScheme: {
+          points: points.map((p: any, i: number) => ({
+            id: p.id || `mp-${existingQuestion.questionNumber}-${i + 1}`,
+            point: p.point || 'Accurate scientific point',
+            marks: 1,
+          })),
+          generalGuidance: q.markScheme?.generalGuidance || existingQuestion.markScheme?.generalGuidance,
+        },
+      };
+    } catch (error) {
+      console.warn('AI single question regeneration failed, generating calibrated question:', error);
+      // Fallback high quality question aligned to topic and LO
+      const subtopic = existingQuestion.learningObjective || blueprint.subtopics?.[0] || blueprint.topic;
+      const targetMarks = existingQuestion.maxMarks || 2;
+      return {
+        id: `q-regen-${Date.now()}`,
+        questionNumber: existingQuestion.questionNumber,
+        type: existingQuestion.type,
+        commandTerm: existingQuestion.commandTerm,
+        prompt: `An investigation was carried out to study ${subtopic}. ${existingQuestion.commandTerm} how the underlying scientific mechanism functions under varying environmental conditions and explain the physiological consequences.`,
+        maxMarks: targetMarks,
+        cognitiveDemand: existingQuestion.cognitiveDemand,
+        difficultyLevel: blueprint.difficultyLevel || 'Standard',
+        learningObjective: existingQuestion.learningObjective,
+        criterion: existingQuestion.criterion,
+        strands: existingQuestion.strands,
+        expectedAnswer: `Precise scientific response for ${subtopic} outlining key structures, causal mechanisms, and observable effects.`,
+        markScheme: {
+          points: Array.from({ length: targetMarks }, (_, i) => ({
+            id: `mp-${existingQuestion.questionNumber}-${i + 1}`,
+            point: `Scientific point ${i + 1} relating to ${subtopic} mechanism and data interpretation`,
+            marks: 1,
+          })),
+          generalGuidance: `Award 1 mark per discrete scientific point up to ${targetMarks} marks.`,
+        },
+      };
+    }
+  }
+
+  /**
+   * Parses an uploaded Question Paper (PDF, Image, or Text) into structured Formative Assessment questions with 100% verbatim accuracy
+   */
+  static async parseQuestionPaperFromPdf(
+    pdfOrFileBase64: string,
+    filename: string,
+    context: {
+      curriculum: string;
+      yearGroup: string;
+      subject: string;
+      topic?: string;
+      mimeType?: string;
+      paperText?: string;
+    }
+  ): Promise<{
+    extractedTitle?: string;
+    extractedTopic?: string;
+    extractedInstructions?: string;
+    totalExtractedMarks?: number;
+    questions: Question[];
+  }> {
+    try {
+      const response = await fetch('/api/ai/parse-question-paper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileBase64: pdfOrFileBase64 || undefined,
+          pdfBase64: pdfOrFileBase64 || undefined,
+          mimeType: context.mimeType,
+          paperText: context.paperText,
+          filename,
+          curriculum: context.curriculum,
+          yearGroup: context.yearGroup,
+          subject: context.subject,
+          topic: context.topic,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await parseErrorResponse(response));
+      }
+
+      const data = await response.json();
+      const isMYP =
+        (context.curriculum || '').toUpperCase().includes('MYP') ||
+        ((context.curriculum || '').toUpperCase().includes('IB') &&
+          !(context.curriculum || '').toUpperCase().includes('DP'));
+
+      const questions: Question[] = (data.questions || []).map((q: any, idx: number) => ({
+        id: `q-pdf-${Date.now()}-${idx + 1}`,
+        questionNumber: q.questionNumber || idx + 1,
+        subQuestionLabel: q.subQuestionLabel || (q.subQuestionLabel === undefined ? undefined : String(q.subQuestionLabel)),
+        type: q.type || 'short_answer',
+        commandTerm: q.commandTerm || 'Explain',
+        prompt: q.prompt,
+        context: q.context,
+        imageCaption: q.imageCaption,
+        imageAlt: q.imageAlt,
+        dataset: q.dataset,
+        tableData: q.tableData,
+        options: q.options,
+        isVerbatimOriginal: true,
+        maxMarks: q.maxMarks || 2,
+        marksMissing: q.marksMissing || false,
+        cognitiveDemand: q.cognitiveDemand || 'Application',
+        learningObjective: q.learningObjective || context.topic || 'Curriculum Objective',
+        criterion: isMYP ? 'Criterion A' : undefined,
+        expectedAnswer: q.expectedAnswer || '',
+        markScheme: q.markScheme || {
+          points: [{ id: `mp-pdf-${idx + 1}-1`, point: q.expectedAnswer || 'Accurate scientific answer demonstrated', marks: q.maxMarks || 2 }],
+          acceptableAlternatives: q.acceptableAlternatives,
+          generalGuidance: q.generalGuidance,
+        },
+      }));
+
+      return {
+        extractedTitle: data.extractedTitle,
+        extractedTopic: data.extractedTopic,
+        extractedInstructions: data.extractedInstructions,
+        totalExtractedMarks: data.totalExtractedMarks,
+        questions,
+      };
+    } catch (error) {
+      console.error('Error parsing question paper:', error);
+      throw error;
     }
   }
 
@@ -75,7 +318,7 @@ export class GeminiService {
       });
 
       if (!response.ok) {
-        throw new Error(`Server returned ${response.status}: ${await response.text()}`);
+        throw new Error(await parseErrorResponse(response));
       }
 
       const data = await response.json();
@@ -117,7 +360,7 @@ export class GeminiService {
       });
 
       if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
+        throw new Error(await parseErrorResponse(response));
       }
 
       const data = await response.json();
@@ -130,7 +373,7 @@ export class GeminiService {
         context: q.context,
         maxMarks: q.maxMarks || 3,
         cognitiveDemand: q.cognitiveDemand || 'Application',
-        learningObjective: q.learningObjective || originalBlueprint.learningObjectives[0],
+        learningObjective: q.learningObjective || originalBlueprint.learningObjectives?.[0] || originalBlueprint.topic,
         criterion: originalBlueprint.selectedCriterion,
         strands: originalBlueprint.selectedStrands,
         expectedAnswer: q.expectedAnswer,
@@ -154,7 +397,7 @@ export class GeminiService {
             prompt: `In a new experiment with dialysis tubing (visking membrane) containing starch and glucose immersed in pure water, explain which solute diffuses out and why, referring to pore size and concentration gradients.`,
             maxMarks: 4,
             cognitiveDemand: 'Application',
-            learningObjective: originalBlueprint.learningObjectives[0] || 'Explain movement of particles down concentration gradients',
+            learningObjective: originalBlueprint.learningObjectives?.[0] || 'Explain movement of particles down concentration gradients',
             expectedAnswer: 'Glucose molecules are small enough to pass through microscopic pores in dialysis tubing down their concentration gradient into the water. Starch polymers are macromolecules and cannot cross. Water enters tubing down water potential gradient.',
             markScheme: {
               points: [
@@ -567,7 +810,7 @@ export class GeminiService {
         prompt: `Define the primary scientific principles governing ${cleanTopic}, and state the key dependent and independent variables used to investigate this phenomenon in laboratory inquiries.`,
         maxMarks: 2,
         cognitiveDemand: 'Recall',
-        learningObjective: blueprint.learningObjectives[0] || `Demonstrate understanding of ${cleanTopic}`,
+        learningObjective: blueprint.learningObjectives?.[0] || `Demonstrate understanding of ${cleanTopic}`,
         expectedAnswer: `Clear definition of ${cleanTopic} with precise scientific terminology and correct identification of dependent and independent variables.`,
         markScheme: {
           points: [
@@ -585,7 +828,7 @@ export class GeminiService {
         prompt: `Explain the causal mechanism underpinning ${cleanTopic}. Detail how changes in physical/chemical conditions alter the observed outcome, referencing scientific laws or theories.`,
         maxMarks: 4,
         cognitiveDemand: 'Application',
-        learningObjective: blueprint.learningObjectives[0] || `Apply knowledge of ${cleanTopic}`,
+        learningObjective: blueprint.learningObjectives?.[0] || `Apply knowledge of ${cleanTopic}`,
         expectedAnswer: `Thorough explanation detailing the mechanism, energy transfers or particle interactions, and the resulting quantitative relationships.`,
         markScheme: {
           points: [
@@ -632,11 +875,255 @@ export class GeminiService {
       });
     }
 
+    const calibrated = this.calibrateAndEnforceAssessmentMarks(questions, blueprint);
+
     return {
       title: blueprint.title || `${blueprint.topic} — Calibrated Formative Assessment`,
-      questions,
+      questions: calibrated,
       validationPassed: true,
     };
+  }
+
+  /**
+   * Strictly enforces that:
+   * 1. Total questions generated matches blueprint.targetQuestionCount (or IGCSE total count).
+   * 2. Total calculated maxMarks across all questions EXACTLY EQUALS blueprint.maxMarks.
+   * 3. Every individual question has structured mark scheme points whose marks sum up exactly to that question's maxMarks.
+   */
+  public static calibrateAndEnforceAssessmentMarks(
+    rawQuestions: Question[],
+    blueprint: FormativeBlueprint
+  ): Question[] {
+    const targetTotalMarks = Math.max(1, Number(blueprint.maxMarks) || 20);
+    const targetQCount = Math.max(
+      1,
+      Number(blueprint.targetQuestionCount) ||
+        (blueprint.curriculum === 'IGCSE' && blueprint.igcseStructure
+          ? (blueprint.igcseStructure.mcqCount || 0) +
+            (blueprint.igcseStructure.structuredCount || 0) +
+            (blueprint.igcseStructure.dataBasedCount || 0)
+          : rawQuestions.length || 5)
+    );
+
+    let questions: Question[] = [...rawQuestions];
+
+    // If we have fewer questions than targetQCount, synthesize additional curriculum-aligned questions
+    const subtopics = blueprint.subtopics && blueprint.subtopics.length > 0 ? blueprint.subtopics : [blueprint.topic];
+    const learningObjs =
+      blueprint.learningObjectives && blueprint.learningObjectives.length > 0
+        ? blueprint.learningObjectives
+        : [`Demonstrate scientific understanding of ${blueprint.topic}`];
+
+    while (questions.length < targetQCount) {
+      const qNum = questions.length + 1;
+      const subtopic = subtopics[(qNum - 1) % subtopics.length];
+      const lo = learningObjs[(qNum - 1) % learningObjs.length];
+
+      if (qNum % 3 === 1) {
+        questions.push({
+          id: `q-gen-${Date.now()}-${qNum}`,
+          questionNumber: qNum,
+          type: 'mcq',
+          commandTerm: 'Identify',
+          prompt: `Which of the following statements accurately characterizes the scientific mechanism of ${subtopic}?`,
+          options: [
+            {
+              id: 'A',
+              text: `It enables efficient physiological function and energy transfer specific to ${subtopic}`,
+              isCorrect: true,
+            },
+            {
+              id: 'B',
+              text: `It operates independently of physical conditions and cellular structure`,
+              isCorrect: false,
+              misconceptionExplanation: `Physical and cellular parameters directly regulate scientific mechanisms.`,
+            },
+            {
+              id: 'C',
+              text: `It is only applicable in plant systems and non-living models`,
+              isCorrect: false,
+              misconceptionExplanation: `This concept applies across general biological and physical systems.`,
+            },
+            {
+              id: 'D',
+              text: `It decreases surface area to volume interactions unconditionally`,
+              isCorrect: false,
+              misconceptionExplanation: `Adaptations typically maximize or optimize surface area ratios.`,
+            },
+          ],
+          maxMarks: 1,
+          cognitiveDemand: 'Recall',
+          learningObjective: lo,
+          criterion: blueprint.selectedCriterion,
+          strands: blueprint.selectedStrands,
+          expectedAnswer: 'A',
+          markScheme: {
+            points: [{ id: `mp-${qNum}-1`, point: `Correctly identifies scientific principle for ${subtopic} (Option A)`, marks: 1 }],
+          },
+        });
+      } else if (qNum % 3 === 2) {
+        questions.push({
+          id: `q-gen-${Date.now()}-${qNum}`,
+          questionNumber: qNum,
+          type: 'extended_response',
+          commandTerm: 'Explain',
+          prompt: `Explain the scientific principles and causal mechanisms underlying ${subtopic}. In your response, relate structure/conditions to the observed function and justify your answer using precise terminology.`,
+          maxMarks: 4,
+          cognitiveDemand: 'Understanding',
+          learningObjective: lo,
+          criterion: blueprint.selectedCriterion,
+          strands: blueprint.selectedStrands,
+          expectedAnswer: `Detailed explanation of ${subtopic} describing the mechanism, relationship between variables, and scientific justification.`,
+          markScheme: {
+            points: [
+              { id: `mp-${qNum}-1`, point: `Explains primary mechanism and definition of ${subtopic}`, marks: 1 },
+              { id: `mp-${qNum}-2`, point: `Relates structural features or physical conditions to observed function`, marks: 1 },
+              { id: `mp-${qNum}-3`, point: `Applies relevant scientific models, laws, or theories correctly`, marks: 1 },
+              { id: `mp-${qNum}-4`, point: `Provides a scientifically justified conclusion with correct units/terms`, marks: 1 },
+            ],
+          },
+        });
+      } else {
+        questions.push({
+          id: `q-gen-${Date.now()}-${qNum}`,
+          questionNumber: qNum,
+          type: 'data_based',
+          commandTerm: 'Analyse',
+          prompt: `Analyze the experimental data for ${subtopic}. Describe the observed trend, calculate key values, and evaluate whether the experimental evidence supports the hypothesis.`,
+          context: `An investigation was conducted under controlled laboratory conditions to examine ${subtopic}.`,
+          dataset: {
+            title: `Table ${qNum}: Experimental Measurements for ${subtopic}`,
+            description: `Triplicate measurements recorded across progressive trials.`,
+            xLabel: 'Condition Level',
+            xUnit: 'Standard Units',
+            yLabel: 'Measured Response',
+            yUnit: 'SI Units',
+            dataPoints: [
+              { x: 'Level 1', y: 14.5, trial1: 14.2, trial2: 14.8, trial3: 14.5, mean: 14.5 },
+              { x: 'Level 2', y: 28.0, trial1: 27.8, trial2: 28.2, trial3: 28.0, mean: 28.0 },
+              { x: 'Level 3', y: 42.1, trial1: 41.9, trial2: 42.3, trial3: 42.1, mean: 42.1 },
+              { x: 'Level 4', y: 56.4, trial1: 56.1, trial2: 56.7, trial3: 56.4, mean: 56.4 },
+            ],
+          },
+          maxMarks: 4,
+          cognitiveDemand: 'Analysis',
+          learningObjective: lo,
+          criterion: blueprint.selectedCriterion,
+          strands: blueprint.selectedStrands,
+          expectedAnswer: `The data indicates a direct positive correlation with the measured response increasing proportionally across conditions.`,
+          markScheme: {
+            points: [
+              { id: `mp-${qNum}-1`, point: `Identifies overall directional trend in the dataset`, marks: 1 },
+              { id: `mp-${qNum}-2`, point: `Calculates quantitative values or percentage change accurately`, marks: 1 },
+              { id: `mp-${qNum}-3`, point: `Evaluates reliability across replicate trials`, marks: 1 },
+              { id: `mp-${qNum}-4`, point: `Justifies conclusion with specific data citations and units`, marks: 1 },
+            ],
+          },
+        });
+      }
+    }
+
+    // If more questions than targetQCount (and not IGCSE multi-section), trim to targetQCount
+    if (questions.length > targetQCount && blueprint.curriculum !== 'IGCSE') {
+      questions = questions.slice(0, targetQCount);
+    }
+
+    // Mathematically distribute targetTotalMarks across all questions
+    const n = questions.length;
+    const weights = questions.map((q) => {
+      if (q.type === 'mcq') return 1;
+      if (q.type === 'short_answer' || q.type === 'numerical') return 2;
+      if (q.type === 'data_based' || q.type === 'graph_interpretation') return 4;
+      if (q.type === 'extended_response' || q.type === 'experimental_design') return 4;
+      return 3;
+    });
+
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    // Allocate raw marks proportional to weights with minimum 1 mark
+    let allocatedMarks = weights.map((w) => Math.max(1, Math.floor((w / totalWeight) * targetTotalMarks)));
+    let currentSum = allocatedMarks.reduce((a, b) => a + b, 0);
+
+    // Distribute remainder mark by mark
+    let diff = targetTotalMarks - currentSum;
+    if (diff > 0) {
+      const sortedIndices = [...Array(n).keys()].sort((a, b) => weights[b] - weights[a]);
+      let idx = 0;
+      while (diff > 0) {
+        allocatedMarks[sortedIndices[idx % n]] += 1;
+        diff -= 1;
+        idx += 1;
+      }
+    } else if (diff < 0) {
+      const sortedIndices = [...Array(n).keys()].sort((a, b) => allocatedMarks[b] - allocatedMarks[a]);
+      let idx = 0;
+      while (diff < 0) {
+        const targetIdx = sortedIndices[idx % n];
+        if (allocatedMarks[targetIdx] > 1) {
+          allocatedMarks[targetIdx] -= 1;
+          diff += 1;
+        }
+        idx += 1;
+        if (idx > n * 10) break;
+      }
+    }
+
+    // Apply allocated marks and regenerate/balance mark schemes
+    return questions.map((q, idx) => {
+      const qMarks = allocatedMarks[idx];
+      const qNum = idx + 1;
+
+      let existingPoints = q.markScheme?.points || [];
+      const updatedPoints: { id: string; point: string; marks: number }[] = [];
+
+      if (q.type === 'mcq') {
+        updatedPoints.push({
+          id: `mp-${qNum}-1`,
+          point: existingPoints[0]?.point || `Correct answer selected (${q.expectedAnswer || 'correct option'})`,
+          marks: qMarks,
+        });
+      } else {
+        if (existingPoints.length === 0) {
+          existingPoints = [
+            { id: `mp-${qNum}-1`, point: `Accurate scientific knowledge and correct terminology demonstrated`, marks: 1 },
+          ];
+        }
+
+        for (let pIdx = 0; pIdx < qMarks; pIdx++) {
+          if (pIdx < existingPoints.length) {
+            updatedPoints.push({
+              id: `mp-${qNum}-${pIdx + 1}`,
+              point: existingPoints[pIdx].point,
+              marks: 1,
+            });
+          } else {
+            const genericDescriptions = [
+              'Clear identification of scientific principles and mechanism',
+              'Logical justification linking structural features or data to conclusions',
+              'Accurate use of curriculum-specific scientific terminology and units',
+              'Critical evaluation or synthesis of experimental variables and errors',
+              'Comprehensive analytical explanation supporting the final deduction',
+            ];
+            updatedPoints.push({
+              id: `mp-${qNum}-${pIdx + 1}`,
+              point: `${genericDescriptions[pIdx % genericDescriptions.length]} for ${q.commandTerm} prompt`,
+              marks: 1,
+            });
+          }
+        }
+      }
+
+      return {
+        ...q,
+        questionNumber: qNum,
+        maxMarks: qMarks,
+        markScheme: {
+          points: updatedPoints,
+          generalGuidance:
+            q.markScheme?.generalGuidance ||
+            `Award 1 mark per distinct point demonstrated. Total maximum for question: ${qMarks} marks.`,
+        },
+      };
+    });
   }
 
   // Fallback strict examiner marking heuristics
@@ -713,7 +1200,7 @@ export class GeminiService {
           {
             gap: 'Deep mechanistic justification',
             evidence: 'Responses omitted complete multi-step scientific reasoning.',
-            criterionOrObjective: assessment.blueprint.learningObjectives[0] || 'Core Objective',
+            criterionOrObjective: assessment.blueprint.learningObjectives?.[0] || 'Core Objective',
             nextStep: 'Practise using cause-and-effect connectives and exact units.',
           },
         ],

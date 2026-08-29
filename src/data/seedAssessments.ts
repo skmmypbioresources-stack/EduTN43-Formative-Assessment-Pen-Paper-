@@ -75,6 +75,10 @@ export const SEED_ASSESSMENTS: FormativeAssessment[] = [
       selectedCriterion: 'Criterion C',
       selectedStrands: ['C(i)', 'C(ii)', 'C(iii)', 'C(iv)', 'C(v)'],
       mypAssessmentMode: 'marks_points',
+      keyConcept: 'Change',
+      relatedConcepts: ['Transformation', 'Movement', 'Evidence'],
+      globalContext: 'Scientific and technical innovation',
+      statementOfInquiry: 'Technological investigations into cellular systems reveal how environmental changes dictate transport mechanisms across membranes.',
       maxMarks: 20,
       targetQuestionCount: 5,
       academicIntegrity: {
@@ -263,6 +267,9 @@ export const SEED_ASSESSMENTS: FormativeAssessment[] = [
         'Explain enzyme specificity using the active site and complementary substrate shape (lock-and-key model)',
         'Explain the effects of temperature changes on enzyme activity and denaturation at high temperatures',
       ],
+      keyConcept: 'Relationships',
+      relatedConcepts: ['Function', 'Interaction', 'Energy'],
+      globalContext: 'Scientific and technical innovation',
       targetQuestionCount: 5,
       igcseStructure: {
         mcqCount: 3,

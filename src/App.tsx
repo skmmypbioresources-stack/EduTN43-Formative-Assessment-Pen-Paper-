@@ -18,6 +18,7 @@ import { FormativeBuilder } from './components/FormativeBuilder';
 import { AssessmentReview } from './components/AssessmentReview';
 import { StudentAssessmentRunner } from './components/StudentAssessmentRunner';
 import { MarkingAndFeedbackView } from './components/MarkingAndFeedbackView';
+import { TeacherMarkingView } from './components/TeacherMarkingView';
 import { ClassAnalyticsView } from './components/ClassAnalyticsView';
 import { StudentProgressView } from './components/StudentProgressView';
 import { QuestionBankModal } from './components/QuestionBankModal';
@@ -25,6 +26,10 @@ import { TargetedReassessmentModal } from './components/TargetedReassessmentModa
 import { StudentReflectionModal } from './components/StudentReflectionModal';
 import { TeacherAuthModal } from './components/TeacherAuthModal';
 import { InstallDesktopAppModal } from './components/InstallDesktopAppModal';
+import { RealTimeWritingMonitor } from './components/RealTimeWritingMonitor';
+import { StudentSubmissionSuccessView } from './components/StudentSubmissionSuccessView';
+import { StudentEvidencePortfolioView } from './components/StudentEvidencePortfolioView';
+import { StudentEvidenceManager } from './components/StudentEvidenceManager';
 import { Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export function App() {
@@ -42,6 +47,13 @@ export function App() {
 
   const [isTeacherAuthModalOpen, setIsTeacherAuthModalOpen] = useState<boolean>(false);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState<boolean>(false);
+  const [appTheme, setAppTheme] = useState<'light' | 'dark'>(() => StorageService.getTheme());
+
+  const toggleAppTheme = () => {
+    const next = appTheme === 'dark' ? 'light' : 'dark';
+    setAppTheme(next);
+    StorageService.setTheme(next);
+  };
 
   // Live Firestore Datasets
   const [assessments, setAssessments] = useState<FormativeAssessment[]>(StorageService.getAssessments());
@@ -60,6 +72,59 @@ export function App() {
       unsubAssessments();
       unsubSubmissions();
     };
+  }, []);
+
+  // Student Evidence Token from URL (e.g. ?evidence=... or ?token=... or ?id=... or /evidence/... or #evidence/...)
+  const [evidenceToken, setEvidenceToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const searchParams = new URLSearchParams(window.location.search);
+    const paramToken =
+      searchParams.get('evidence') ||
+      searchParams.get('token') ||
+      searchParams.get('student') ||
+      searchParams.get('id') ||
+      searchParams.get('roll');
+    if (paramToken) return paramToken;
+
+    const path = window.location.pathname;
+    const match = path.match(/^\/evidence\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) return match[1];
+
+    const hashMatch = window.location.hash.match(/evidence\/([a-zA-Z0-9_-]+)/);
+    if (hashMatch && hashMatch[1]) return hashMatch[1];
+
+    return null;
+  });
+
+  useEffect(() => {
+    const handleUrlCheck = () => {
+      const searchParams = new URLSearchParams(window.location.search);
+      const paramToken =
+        searchParams.get('evidence') ||
+        searchParams.get('token') ||
+        searchParams.get('student') ||
+        searchParams.get('id') ||
+        searchParams.get('roll');
+      if (paramToken) {
+        setEvidenceToken(paramToken);
+        return;
+      }
+      const path = window.location.pathname;
+      const match = path.match(/^\/evidence\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        setEvidenceToken(match[1]);
+        return;
+      }
+      const hashMatch = window.location.hash.match(/evidence\/([a-zA-Z0-9_-]+)/);
+      if (hashMatch && hashMatch[1]) {
+        setEvidenceToken(hashMatch[1]);
+        return;
+      }
+      setEvidenceToken(null);
+    };
+
+    window.addEventListener('popstate', handleUrlCheck);
+    return () => window.removeEventListener('popstate', handleUrlCheck);
   }, []);
 
   // Navigation / View State
@@ -105,7 +170,14 @@ export function App() {
 
   // Tab change with security check for teacher-only views
   const handleTabChange = (targetTab: string) => {
-    const teacherOnlyTabs = ['builder', 'student_works', 'analytics', 'question_bank'];
+    const teacherOnlyTabs = [
+      'builder',
+      'student_works',
+      'student_evidence_manager',
+      'analytics',
+      'question_bank',
+      'live_monitor',
+    ];
     if (teacherOnlyTabs.includes(targetTab) && (!isTeacherAuthenticated || activeUser.role !== 'teacher')) {
       setIsTeacherAuthModalOpen(true);
       return;
@@ -119,7 +191,10 @@ export function App() {
     setGenerationStatus(`Consulting ${blueprint.curriculum} Sciences syllabus and formulating authentic questions and mark schemes for ${blueprint.topic}...`);
 
     try {
-      const result = await GeminiService.generateFormative(blueprint);
+      const result = await GeminiService.generateFormative(
+        blueprint,
+        blueprint.teacherCustomInstructions
+      );
 
       const newAssessment: FormativeAssessment = {
         id: `formative-${Date.now()}`,
@@ -153,6 +228,14 @@ export function App() {
       setIsGenerating(false);
       alert('Failed to generate assessment. Please check your topic and try again.');
     }
+  };
+
+  // Direct assessment ready (e.g. from digitized question paper PDF)
+  const handleDirectAssessmentReady = async (assessment: FormativeAssessment) => {
+    await StorageService.saveAssessment(assessment);
+    setAssessments(StorageService.getAssessments());
+    setActiveAssessment(assessment);
+    setCurrentTab('review');
   };
 
   // 2. Publish assessment -> immediately accessible to students in Firestore
@@ -197,19 +280,25 @@ export function App() {
   // 6. Student begins task with pre-flight identity
   const handleStartAssessmentWithProfile = (
     assessment: FormativeAssessment,
-    studentDetails: { name: string; classSection: string; curriculum: CurriculumType; academicYear: string }
+    studentDetails: { name: string; classSection: string; curriculum: CurriculumType; academicYear: string },
+    isRedo?: boolean
   ) => {
     setActiveAssessment(assessment);
     setActiveStudentRunnerProfile(studentDetails);
-    // Find existing submission for this student and assessment if any
-    const existing = (Object.values(submissions) as Submission[]).find(
-      (s) => s.formativeId === assessment.id && s.studentName === studentDetails.name
-    );
-    setActiveSubmission(existing || null);
+    // If it's a redo, start with a clean slate
+    if (isRedo) {
+      setActiveSubmission(null);
+    } else {
+      // Find existing submission for this student and assessment if any
+      const existing = (Object.values(submissions) as Submission[]).find(
+        (s) => s.formativeId === assessment.id && s.studentName === studentDetails.name
+      );
+      setActiveSubmission(existing || null);
+    }
     setCurrentTab('runner');
   };
 
-  // 7. Student submits assessment -> triggers strict AI Examiner Marking & saves to Firestore
+  // 7. Student submits assessment -> stores work as submitted for teacher evaluation
   const handleStudentSubmit = async (
     responses: Record<string, StudentResponse>,
     integrityAudit?: {
@@ -223,58 +312,54 @@ export function App() {
     if (!activeAssessment) return;
 
     const studentName = activeStudentRunnerProfile?.name || activeUser.name || 'Student';
-    const studentClass = activeStudentRunnerProfile?.classSection || activeAssessment.blueprint.classSection || 'Grade 9A';
-    const curriculum = activeStudentRunnerProfile?.curriculum || activeAssessment.blueprint.curriculum;
+    const matchedRegisteredStudent = StorageService.getStudentByName(studentName) || StorageService.getStudentById(studentName);
+
+    const studentId = matchedRegisteredStudent?.studentId || (activeUser.role === 'student' && activeUser.id !== 'student-portal-user' ? activeUser.id : `STU-${studentName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`);
+    const studentClass =
+      matchedRegisteredStudent?.classSection ||
+      activeStudentRunnerProfile?.classSection ||
+      activeAssessment.blueprint.classSection ||
+      activeAssessment.blueprint.yearGroup ||
+      'MYP 2';
+    const curriculum = activeStudentRunnerProfile?.curriculum || activeAssessment.blueprint.curriculum || 'IBMYP';
     const academicYear = activeStudentRunnerProfile?.academicYear || activeAssessment.blueprint.academicYear || DEFAULT_ACADEMIC_YEAR;
 
-    setIsGenerating(true);
-    setGenerationStatus('Strict AI Examiner is evaluating student evidence, mark schemes, and diagnosing learning gaps...');
+    const newSubmission: Submission = {
+      id: `sub-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      formativeId: activeAssessment.id,
+      formativeVersion: activeAssessment.version,
+      studentId,
+      studentName,
+      classSection: studentClass,
+      academicYear,
+      curriculum,
+      subject: activeAssessment.blueprint.subject,
+      teacherName: activeAssessment.blueprint.teacherName,
+      startedAt: new Date().toISOString(),
+      status: 'Pending Teacher Review',
+      responses,
+      totalMarksAwarded: 0,
+      totalMaxMarks: activeAssessment.blueprint.maxMarks || 20,
+      submittedAt: new Date().toISOString(),
+      integrityAudit: integrityAudit || {
+        tabSwitchCount: 0,
+        copyPasteAttempts: 0,
+        isLockdownViolated: false,
+        fullscreenExitCount: 0,
+        logs: [],
+      },
+    };
 
     try {
-      const marking = await GeminiService.markSubmission(
-        activeAssessment,
-        responses,
-        studentName
-      );
-
-      const newSubmission: Submission = {
-        id: `sub-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-        formativeId: activeAssessment.id,
-        formativeVersion: activeAssessment.version,
-        studentId: `student-${Date.now()}`,
-        studentName,
-        classSection: studentClass,
-        academicYear,
-        curriculum,
-        subject: activeAssessment.blueprint.subject,
-        teacherName: activeAssessment.blueprint.teacherName,
-        startedAt: new Date().toISOString(),
-        status: 'Submitted',
-        responses,
-        totalMarksAwarded: marking.totalMarks,
-        totalMaxMarks: marking.maxMarks,
-        mypOverallAchievementLevel: marking.mypLevel,
-        markingResults: marking.markingResults,
-        diagnosis: marking.diagnosis,
-        submittedAt: new Date().toISOString(),
-        integrityAudit: integrityAudit || {
-          tabSwitchCount: 0,
-          copyPasteAttempts: 0,
-          isLockdownViolated: false,
-          fullscreenExitCount: 0,
-          logs: [],
-        },
-      };
-
       await StorageService.saveSubmission(newSubmission);
       setSubmissions(StorageService.getSubmissions());
       setActiveSubmission(newSubmission);
       setIsGenerating(false);
-      setCurrentTab('marking');
+      setCurrentTab('submission_success');
     } catch (e: any) {
-      console.error('Marking error:', e);
+      console.error('Submission save error:', e);
       setIsGenerating(false);
-      alert('Failed to process AI examiner marking. Please try submitting again.');
+      alert('Failed to log student submission. Please try submitting again.');
     }
   };
 
@@ -297,6 +382,20 @@ export function App() {
   const submissionsList = Object.values(submissions) as Submission[];
   const isTeacher = activeUser.role === 'teacher' && isTeacherAuthenticated;
 
+  if (evidenceToken) {
+    return (
+      <StudentEvidencePortfolioView
+        token={evidenceToken}
+        onBackToPortal={() => {
+          if (window.history.pushState) {
+            window.history.pushState({}, '', '/');
+          }
+          setEvidenceToken(null);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans antialiased">
       {/* Navigation */}
@@ -309,6 +408,8 @@ export function App() {
           activeTab={currentTab}
           onTabChange={handleTabChange}
           onOpenInstallModal={() => setIsInstallModalOpen(true)}
+          theme={appTheme}
+          onToggleTheme={toggleAppTheme}
         />
       )}
 
@@ -339,6 +440,7 @@ export function App() {
               setActiveAssessment(ass);
               setCurrentTab('review');
             }}
+            onPublishAssessment={handlePublishAssessment}
             onViewMarking={(ass, sub) => {
               setActiveAssessment(ass);
               setActiveSubmission(sub);
@@ -346,8 +448,29 @@ export function App() {
             }}
             onViewAnalytics={() => setCurrentTab('analytics')}
             onViewStudentWorks={() => setCurrentTab('student_works')}
+            onViewEvidenceLinks={() => setCurrentTab('student_evidence_manager')}
+            onViewLiveMonitor={() => setCurrentTab('live_monitor')}
             onDeleteAssessment={handleDeleteAssessment}
             onLockTeacherMode={handleLockTeacherMode}
+          />
+        )}
+
+        {/* REAL-TIME PROCTORING & LIVE WRITING MONITOR (Teacher Only) */}
+        {currentTab === 'live_monitor' && isTeacher && (
+          <RealTimeWritingMonitor
+            assessments={assessments}
+            activeTeacher={activeUser}
+            isDaylight={appTheme === 'light'}
+            onOpenAssessmentRunner={(ass, studentProf) => {
+              setActiveAssessment(ass);
+              setActiveStudentRunnerProfile({
+                name: studentProf?.name || 'Live Student',
+                classSection: studentProf?.classSections?.[0] || ass.blueprint.classSection || 'MYP 2',
+                curriculum: ass.blueprint.curriculum,
+                academicYear: ass.blueprint.academicYear || DEFAULT_ACADEMIC_YEAR,
+              });
+              setCurrentTab('runner');
+            }}
           />
         )}
 
@@ -361,7 +484,35 @@ export function App() {
               setActiveSubmission(sub);
               setCurrentTab('marking');
             }}
+            onTeacherMark={(ass, sub) => {
+              setActiveAssessment(ass);
+              setActiveSubmission(sub);
+              setCurrentTab('teacher_marking');
+            }}
             onResetAcademicYear={handleResetAcademicYear}
+            onOpenEvidenceManager={() => setCurrentTab('student_evidence_manager')}
+          />
+        )}
+
+        {/* STUDENT EVIDENCE LINK MANAGER (Teacher Only - Toddle Portfolio Integration) */}
+        {currentTab === 'student_evidence_manager' && isTeacher && (
+          <StudentEvidenceManager onBackToDashboard={() => setCurrentTab('dashboard')} />
+        )}
+
+        {/* TEACHER-LED MARKING & INDIVIDUALIZED FEEDBACK SUITE */}
+        {currentTab === 'teacher_marking' && isTeacher && activeAssessment && activeSubmission && (
+          <TeacherMarkingView
+            assessment={activeAssessment}
+            submission={activeSubmission}
+            activeTeacher={activeUser}
+            onSaveDraft={async (updatedDraft) => {
+              await handleUpdateSubmission(updatedDraft);
+            }}
+            onPublishFeedback={async (finalSub) => {
+              await handleUpdateSubmission(finalSub);
+              setCurrentTab('student_works');
+            }}
+            onBack={() => setCurrentTab('student_works')}
           />
         )}
 
@@ -389,6 +540,7 @@ export function App() {
           <FormativeBuilder
             defaultTeacherName={activeUser.name}
             onBlueprintReady={handleBlueprintReady}
+            onAssessmentReady={handleDirectAssessmentReady}
             onCancel={() => setCurrentTab('dashboard')}
           />
         )}
@@ -402,6 +554,7 @@ export function App() {
               handleSaveDraftAssessment(updated);
             }}
             onSaveDraft={handleSaveDraftAssessment}
+            onPublish={handlePublishAssessment}
             onPreviewStudentMode={() => {
               setActiveStudentRunnerProfile({
                 name: 'Student Preview',
@@ -430,6 +583,20 @@ export function App() {
             }
             onSubmitAssessment={handleStudentSubmit}
             onExit={() => setCurrentTab('dashboard')}
+          />
+        )}
+
+        {/* STUDENT SUBMISSION SUCCESS CONFIRMATION RECEIPT */}
+        {currentTab === 'submission_success' && activeAssessment && activeSubmission && (
+          <StudentSubmissionSuccessView
+            assessment={activeAssessment}
+            submission={activeSubmission}
+            activeUser={{
+              ...activeUser,
+              name: activeSubmission.studentName || activeUser.name,
+            }}
+            onReturnToDashboard={() => setCurrentTab('dashboard')}
+            onViewProgress={() => setCurrentTab('student_progress')}
           />
         )}
 

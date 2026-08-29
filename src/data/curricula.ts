@@ -199,3 +199,46 @@ export const COMMAND_TERMS = [
   { term: 'Design', definition: 'Produce a plan, simulation or model that addresses a specific scientific inquiry.', cognitiveDemand: 'Design' },
   { term: 'Suggest', definition: 'Propose a solution, hypothesis or other possible answer based on scientific principles.', cognitiveDemand: 'Evaluation' },
 ];
+
+export const MYP_KEY_CONCEPTS = [
+  'Relationships',
+  'Systems',
+  'Change',
+  'Form',
+  'Function',
+  'Development',
+  'Connections',
+  'Global interactions',
+  'Perspective',
+  'Time, place and space',
+  'Communication',
+  'Communities',
+  'Culture',
+  'Creativity',
+  'Logic',
+];
+
+export const MYP_RELATED_CONCEPTS_SCIENCES = [
+  'Balance',
+  'Consequences',
+  'Energy',
+  'Environment',
+  'Evidence',
+  'Form',
+  'Function',
+  'Interaction',
+  'Models',
+  'Movement',
+  'Patterns',
+  'Transformation',
+];
+
+export const MYP_GLOBAL_CONTEXTS = [
+  'Scientific and technical innovation',
+  'Globalization and sustainability',
+  'Identities and relationships',
+  'Orientation in space and time',
+  'Personal and cultural expression',
+  'Fairness and development',
+];
+

@@ -52,6 +52,8 @@ export type FormativeStatus =
 
 export type CognitiveDemand = 'Recall' | 'Understanding' | 'Application' | 'Analysis' | 'Evaluation' | 'Design';
 
+export type DifficultyLevel = 'Foundational' | 'Standard' | 'Challenging' | 'Mixed';
+
 export type QuestionType = 
   | 'mcq'
   | 'short_answer'
@@ -69,24 +71,46 @@ export interface MCQOption {
   misconceptionExplanation?: string;
 }
 
+export interface DataSeries {
+  key: string;
+  name: string;
+  color?: string;
+}
+
 export interface DataPoint {
   x: number | string;
-  y: number;
+  y?: number; // legacy single-series or primary value
   label?: string;
   trial1?: number;
   trial2?: number;
   trial3?: number;
   mean?: number;
+  // Multi-series values: e.g. { "withInhibitor": 1.0, "withoutInhibitor": 1.0 } or arbitrary key-value mappings
+  seriesValues?: Record<string, number>;
+  [key: string]: any;
+}
+
+export interface TableSpec {
+  title?: string;
+  headers: string[];
+  rows: (string | number)[][];
+  caption?: string;
+  footnote?: string;
+  highlightedRows?: number[];
+  columnAlignments?: ('left' | 'center' | 'right')[];
 }
 
 export interface DatasetSpec {
   title: string;
-  description: string;
+  chartType?: 'bar' | 'line' | 'scatter' | 'area';
+  description?: string;
   xLabel: string;
-  xUnit: string;
+  xUnit?: string;
   yLabel: string;
-  yUnit: string;
+  yUnit?: string;
+  series?: DataSeries[]; // Multi-series definitions (e.g. "With inhibitor" vs "Without inhibitor")
   dataPoints: DataPoint[];
+  tableData?: TableSpec; // Direct structured scientific table (e.g. Solution | Initial Mass | Final Mass)
   calculatedStats?: {
     trendDescription?: string;
     anomalies?: string[];
@@ -106,18 +130,24 @@ export interface MarkingPoint {
 export interface Question {
   id: string;
   questionNumber: number;
+  subQuestionLabel?: string; // e.g. "4(a)", "1(b)"
   type: QuestionType;
   commandTerm: string;
   prompt: string;
   context?: string;
   dataset?: DatasetSpec;
+  tableData?: TableSpec;
   graphType?: 'line' | 'bar' | 'scatter';
   options?: MCQOption[];
   imageUrl?: string;
   imageCaption?: string;
   imageAlt?: string;
+  stimulusImageUrl?: string;
+  isVerbatimOriginal?: boolean; // Flag to indicate 100% exact copy of source paper without alterations
   maxMarks: number;
+  marksMissing?: boolean; // Flagged when uploaded PDF does not specify marks
   cognitiveDemand: CognitiveDemand;
+  difficultyLevel?: DifficultyLevel;
   learningObjective: string;
   criterion?: MYPCriterion;
   strands?: string[];
@@ -156,13 +186,27 @@ export interface FormativeBlueprint {
   topic: string;
   subtopics: string[];
   learningObjectives: string[];
+  // Marking Mode: AI Auto-Mark vs Teacher Marks & Publishes
+  markingMode?: 'ai_auto' | 'teacher_marked';
   // IBMYP specific
   selectedCriterion?: MYPCriterion;
   selectedStrands?: string[];
   mypAssessmentMode?: 'achievement_levels' | 'marks_points'; // MYP 1-3 vs 4-5
+  keyConcept?: string; // e.g. 'Systems', 'Relationships', 'Change'
+  relatedConcepts?: string[]; // e.g. ['Form', 'Function', 'Consequences', 'Energy', 'Environment']
+  globalContext?: string; // e.g. 'Scientific and technical innovation', 'Globalization and sustainability'
+  statementOfInquiry?: string;
   // Marking config
+  difficultyLevel?: DifficultyLevel;
   maxMarks?: number;
   targetQuestionCount: number;
+  // Uploaded PDF Source Record
+  sourcePdf?: {
+    name: string;
+    size: number;
+    dataUrl?: string;
+    uploadedAt: string;
+  };
   // IGCSE specific distribution
   igcseStructure?: {
     mcqCount: number;
@@ -178,6 +222,7 @@ export interface FormativeBlueprint {
     lockdownTabSwitch?: boolean;
     maxTabSwitchViolations?: number;
   };
+  teacherCustomInstructions?: string;
 }
 
 export interface StudentResponse {
@@ -260,13 +305,33 @@ export interface Submission {
   teacherName?: string;
   startedAt: string;
   submittedAt: string;
-  status: 'In Progress' | 'Submitted' | 'Marked' | 'Reflected';
+  status: 'In Progress' | 'Submitted' | 'Marked' | 'Reflected' | 'Pending Teacher Review' | 'Reviewed by Teacher';
   responses: Record<string, StudentResponse>;
   markingResults?: Record<string, QuestionMarkingResult>;
   totalMarksAwarded?: number;
   totalMaxMarks?: number;
   mypOverallAchievementLevel?: number; // 0-8 for MYP 1-3
   diagnosis?: LearningGapDiagnosis;
+  // Teacher Marking Draft (In-progress review)
+  teacherMarkingDraft?: {
+    questionFeedback: Record<string, { marksAwarded?: number; comment: string }>;
+    overallComment: string;
+    strengths?: string[];
+    priorityImprovementTarget?: string;
+    markedById?: string;
+    markedByName?: string;
+    updatedAt: string;
+  };
+  // Teacher Published Feedback (Final teacher review)
+  teacherFeedback?: {
+    questionFeedback: Record<string, { marksAwarded: number; comment: string }>;
+    overallComment: string;
+    strengths?: string[];
+    priorityImprovementTarget?: string;
+    markedById: string;
+    markedByName: string;
+    publishedAt: string;
+  };
   reflection?: StudentReflection;
   teacherNotes?: string;
   targetedReassessmentCreated?: boolean;
@@ -313,4 +378,54 @@ export interface UserProfile {
   role: 'teacher' | 'student' | 'admin';
   classSections?: string[];
   subjects?: Subject[];
+}
+
+export interface StudentRecord {
+  id: string; // Internal unique ID or matches studentId
+  studentId: string; // e.g. "001", "STU-101"
+  name: string; // e.g. "Student A"
+  classSection: string; // e.g. "MYP 5", "Grade 9A"
+  section?: string; // e.g. "Biology", "Science A"
+  subject?: Subject | string; // e.g. "Biology"
+  curriculum?: CurriculumType; // e.g. "IBMYP"
+  academicYear?: string; // e.g. "2025-2026"
+  email?: string;
+  evidenceToken: string; // Unique unpredictable permanent token e.g. "Ab7Kx92LmQ48"
+  createdAt: string;
+  updatedAt?: string;
+  notes?: string;
+}
+
+export interface LiveStudentSession {
+  id: string; // formatted as `${formativeId}_${studentId}`
+  formativeId: string;
+  formativeTitle: string;
+  classSection: string;
+  studentId: string;
+  studentName: string;
+  startedAt: string;
+  lastActiveAt: string;
+  currentQuestionIndex: number;
+  totalQuestions: number;
+  answeredQuestionsCount: number;
+  currentQuestionId: string;
+  currentTypedDraft: string; // real-time keystroke buffer of the currently active question
+  responses: Record<string, StudentResponse>;
+  status: 'active' | 'idle' | 'tab_switched' | 'focus_lost' | 'submitted';
+  timeRemainingSeconds?: number;
+  activeTeacherAlert?: string; // Real-time proctor alert sent from teacher to student screen
+  integrityAudit: {
+    tabSwitchCount: number;
+    copyPasteAttempts: number;
+    isLockdownViolated: boolean;
+    fullscreenExitCount?: number;
+    awayDurationSeconds?: number;
+    isCurrentlyAway?: boolean;
+    awayStartedAt?: string;
+    logs: {
+      timestamp: string;
+      event: string;
+      details: string;
+    }[];
+  };
 }

@@ -18,6 +18,8 @@ import {
   GraduationCap,
   Layers,
   Filter,
+  Radio,
+  Link2,
 } from 'lucide-react';
 import { ReportGenerator } from '../services/reportGenerator';
 
@@ -27,9 +29,12 @@ interface TeacherDashboardProps {
   submissions: Submission[];
   onCreateNew: () => void;
   onEditDraft: (assessment: FormativeAssessment) => void;
+  onPublishAssessment?: (assessment: FormativeAssessment) => void;
   onViewMarking: (assessment: FormativeAssessment, submission: Submission) => void;
   onViewAnalytics: () => void;
   onViewStudentWorks: () => void;
+  onViewEvidenceLinks?: () => void;
+  onViewLiveMonitor?: () => void;
   onDeleteAssessment: (id: string, passwordInput: string) => Promise<{ success: boolean; error?: string }>;
   onLockTeacherMode?: () => void;
 }
@@ -40,9 +45,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   submissions,
   onCreateNew,
   onEditDraft,
+  onPublishAssessment,
   onViewMarking,
   onViewAnalytics,
   onViewStudentWorks,
+  onViewEvidenceLinks,
+  onViewLiveMonitor,
   onDeleteAssessment,
   onLockTeacherMode,
 }) => {
@@ -114,13 +122,42 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </button>
           )}
 
+          {onViewLiveMonitor && (
+            <button
+              onClick={onViewLiveMonitor}
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-2 transition-colors relative"
+            >
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white"></span>
+              </span>
+              <span>Live Writing Proctor</span>
+            </button>
+          )}
+
           <button
             onClick={onViewStudentWorks}
-            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-2 transition-colors"
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-2 transition-colors relative"
           >
             <GraduationCap className="w-4 h-4" />
-            All Student Works ({submissions.length})
+            <span>All Student Works ({submissions.length})</span>
+            {submissions.filter((s) => s.status === 'Pending Teacher Review').length > 0 && (
+              <span className="bg-amber-400 text-amber-950 text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs">
+                {submissions.filter((s) => s.status === 'Pending Teacher Review').length} to mark
+              </span>
+            )}
           </button>
+
+          {onViewEvidenceLinks && (
+            <button
+              onClick={onViewEvidenceLinks}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-2 transition-colors"
+              title="Manage permanent student formative evidence links for Toddle"
+            >
+              <Link2 className="w-4 h-4 text-emerald-400" />
+              <span>Evidence Links (Toddle)</span>
+            </button>
+          )}
 
           <button
             onClick={onViewAnalytics}
@@ -287,7 +324,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => onEditDraft(ass)}
@@ -295,6 +332,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       >
                         <Eye className="w-3.5 h-3.5" /> View / Edit
                       </button>
+
+                      {isDraft && onPublishAssessment && (
+                        <button
+                          type="button"
+                          onClick={() => onPublishAssessment(ass)}
+                          className="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-xs transition-colors"
+                          title={`Publish this task to make it active for ${bp.classSection} students`}
+                        >
+                          <Send className="w-3 h-3" /> Publish
+                        </button>
+                      )}
 
                       <button
                         onClick={() => {

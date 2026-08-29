@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import {
   FormativeAssessment,
   Question,
+  DatasetSpec,
+  TableSpec,
 } from '../types';
 import {
   Sparkles,
@@ -24,9 +26,17 @@ import {
   Save,
   Check,
   ExternalLink,
+  Home,
+  RefreshCw,
+  BarChart3,
+  Table as TableIcon,
 } from 'lucide-react';
+import { GeminiService } from '../services/geminiService';
 import { QuestionImageEditor } from './QuestionImageEditor';
 import { ImageLightboxModal } from './ImageLightboxModal';
+import { ScienceGraphViewer } from './ScienceGraphViewer';
+import { DataAndGraphEditorModal } from './DataAndGraphEditorModal';
+import { CURRICULA } from '../data/curricula';
 
 interface AssessmentReviewProps {
   assessment: FormativeAssessment;
@@ -64,6 +74,9 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
   } | null>(null);
   const [showCustomImageEditor, setShowCustomImageEditor] = useState<boolean>(false);
 
+  // Data and Graph Editor State
+  const [dataEditorQuestion, setDataEditorQuestion] = useState<Question | null>(null);
+
   // Lightbox Zoom State
   const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
   const [lightboxCaption, setLightboxCaption] = useState<string | undefined>(undefined);
@@ -76,10 +89,93 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
   const [customExpected, setCustomExpected] = useState<string>('');
   const [customMarks, setCustomMarks] = useState<number>(3);
 
-  // Regenerate single question loading state
+  // Regenerate single question state
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [regenerateModalQuestion, setRegenerateModalQuestion] = useState<Question | null>(null);
+  const [regenerateTeacherGuidance, setRegenerateTeacherGuidance] = useState<string>('');
+  const [regenerateSuccessToast, setRegenerateSuccessToast] = useState<string | null>(null);
+
+  // Regenerate ENTIRE question paper state
+  const [showRegenerateEntireModal, setShowRegenerateEntireModal] = useState<boolean>(false);
+  const [regenerateEntireInstructions, setRegenerateEntireInstructions] = useState<string>('');
+  const [isRegeneratingEntire, setIsRegeneratingEntire] = useState<boolean>(false);
 
   const bp = currentAssessment.blueprint;
+  const effectiveClassSection =
+    bp.classSection && bp.classSection !== 'Grade 9A' ? bp.classSection : bp.yearGroup || 'MYP 2';
+
+  // Metadata / Grade / Section Edit state
+  const [showEditMetadataModal, setShowEditMetadataModal] = useState<boolean>(false);
+  const [metaYearGroup, setMetaYearGroup] = useState<string>(bp.yearGroup || 'MYP 2');
+  const [metaClassSection, setMetaClassSection] = useState<string>(effectiveClassSection);
+  const [metaTitle, setMetaTitle] = useState<string>(bp.title || '');
+  const [metaAssessmentDate, setMetaAssessmentDate] = useState<string>(bp.assessmentDate || '');
+  const [metaTimeLimit, setMetaTimeLimit] = useState<number>(bp.timeLimitMinutes || 45);
+
+  const handleSaveMetadata = () => {
+    const updatedBp = {
+      ...bp,
+      yearGroup: (metaYearGroup as any) || bp.yearGroup || 'MYP 2',
+      classSection: metaClassSection.trim() || metaYearGroup || 'MYP 2',
+      title: metaTitle.trim() || bp.title,
+      assessmentDate: metaAssessmentDate || bp.assessmentDate,
+      timeLimitMinutes: Number(metaTimeLimit) || bp.timeLimitMinutes || 45,
+    };
+    const updatedAssessment: FormativeAssessment = {
+      ...currentAssessment,
+      title: updatedBp.title,
+      blueprint: updatedBp,
+      updatedAt: new Date().toISOString(),
+    };
+    setCurrentAssessment(updatedAssessment);
+    onUpdateAssessment(updatedAssessment);
+    onSaveDraft(updatedAssessment);
+    setShowEditMetadataModal(false);
+    setRegenerateSuccessToast('Assessment details and Grade/Section updated successfully!');
+    setTimeout(() => setRegenerateSuccessToast(null), 4000);
+  };
+
+  // Handle regenerating the entire question paper
+  const handleRegenerateEntirePaper = async (customInstructions?: string) => {
+    setIsRegeneratingEntire(true);
+    try {
+      const instructions = customInstructions !== undefined ? customInstructions : regenerateEntireInstructions;
+      const prevQuestionPrompts = currentAssessment.questions.map((q) => q.prompt);
+
+      const result = await GeminiService.generateFormative(
+        bp,
+        instructions,
+        prevQuestionPrompts
+      );
+
+      if (!result.questions || result.questions.length === 0) {
+        throw new Error('No questions returned from assessment generator');
+      }
+
+      const newAss: FormativeAssessment = {
+        ...currentAssessment,
+        title: result.title || currentAssessment.title,
+        questions: result.questions,
+        updatedAt: new Date().toISOString(),
+      };
+
+      setCurrentAssessment(newAss);
+      onUpdateAssessment(newAss);
+      onSaveDraft(newAss);
+
+      setShowRegenerateEntireModal(false);
+      setRegenerateEntireInstructions('');
+      setRegenerateSuccessToast(
+        `Entire question paper successfully regenerated with ${result.questions.length} fresh questions!`
+      );
+      setTimeout(() => setRegenerateSuccessToast(null), 4500);
+    } catch (e: any) {
+      console.error('Failed to regenerate entire question paper:', e);
+      alert('Could not regenerate the entire question paper. Please check connection and try again.');
+    } finally {
+      setIsRegeneratingEntire(false);
+    }
+  };
 
   // Handle delete question
   const handleDeleteQuestion = (qId: string) => {
@@ -107,24 +203,32 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
     onSaveDraft(newAss);
   };
 
-  // Handle single question regeneration
-  const handleRegenerateSingle = async (q: Question) => {
+  // Handle single question regeneration with Gemini AI
+  const handleRegenerateSingle = async (q: Question, customGuidance?: string) => {
     setRegeneratingId(q.id);
     try {
-      setTimeout(() => {
-        const regenerated: Question = {
-          ...q,
-          prompt: `[Regenerated] In an authentic laboratory investigation on ${bp.topic}, ${q.commandTerm.toLowerCase()} how variables are systematically controlled and evaluate the resulting data patterns.`,
-          expectedAnswer: `Detailed regenerated scientific response matching ${q.learningObjective}.`,
-        };
-        const updated = currentAssessment.questions.map((item) => (item.id === q.id ? regenerated : item));
-        const newAss = { ...currentAssessment, questions: updated };
-        setCurrentAssessment(newAss);
-        onUpdateAssessment(newAss);
-        onSaveDraft(newAss);
-        setRegeneratingId(null);
-      }, 700);
-    } catch (e) {
+      const regenerated = await GeminiService.regenerateSingleQuestion(bp, q, customGuidance);
+      // Keep question number and ID consistent
+      const finalizedQ: Question = {
+        ...regenerated,
+        id: q.id,
+        questionNumber: q.questionNumber,
+      };
+
+      const updated = currentAssessment.questions.map((item) => (item.id === q.id ? finalizedQ : item));
+      const newAss = { ...currentAssessment, questions: updated, updatedAt: new Date().toISOString() };
+      setCurrentAssessment(newAss);
+      onUpdateAssessment(newAss);
+      onSaveDraft(newAss);
+
+      setRegenerateModalQuestion(null);
+      setRegenerateTeacherGuidance('');
+      setRegenerateSuccessToast(`Question ${q.questionNumber} successfully regenerated with AI!`);
+      setTimeout(() => setRegenerateSuccessToast(null), 3500);
+    } catch (e: any) {
+      console.error('Failed to regenerate single question:', e);
+      alert('Could not regenerate question. Please try again.');
+    } finally {
       setRegeneratingId(null);
     }
   };
@@ -167,7 +271,7 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
       prompt: customPrompt,
       maxMarks: customMarks,
       cognitiveDemand: 'Application',
-      learningObjective: bp.learningObjectives[0] || bp.topic,
+      learningObjective: bp.learningObjectives?.[0] || bp.topic || 'Curriculum Objective',
       criterion: bp.selectedCriterion,
       strands: bp.selectedStrands,
       expectedAnswer: customExpected,
@@ -197,6 +301,10 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
   const handlePublish = () => {
     const published: FormativeAssessment = {
       ...currentAssessment,
+      blueprint: {
+        ...currentAssessment.blueprint,
+        classSection: effectiveClassSection,
+      },
       status: 'Published',
       publishedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -219,6 +327,39 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+      {/* Navigation Breadcrumb / Top Bar */}
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition-all shadow-xs flex items-center gap-2 hover:translate-x-[-2px]"
+          title="Return to Faculty Dashboard"
+        >
+          <Home className="w-4 h-4 text-blue-600" />
+          <span>&larr; Back to Faculty Dashboard</span>
+        </button>
+
+        <div className="text-xs text-slate-500 font-medium">
+          Draft Autosaved &bull; {currentAssessment.questions.length} Questions &bull; {totalCalculatedMarks} Total Marks
+        </div>
+      </div>
+
+      {/* Regeneration Toast */}
+      {regenerateSuccessToast && (
+        <div className="bg-emerald-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg flex items-center justify-between gap-2 border border-emerald-400 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-white" />
+            <span>{regenerateSuccessToast}</span>
+          </div>
+          <button
+            onClick={() => setRegenerateSuccessToast(null)}
+            className="text-white/80 hover:text-white text-xs font-bold px-1"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Top Banner */}
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -238,22 +379,65 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
                 'DRAFT (NOT YET PUBLISHED)'
               )}
             </span>
-            <span className="text-xs text-slate-500 font-medium">
-              Curriculum: <strong>{bp.curriculum}</strong> | Section: <strong>{bp.classSection}</strong>
-            </span>
+            {(() => {
+              const displaySection =
+                bp.classSection && bp.classSection !== 'Grade 9A' ? bp.classSection : bp.yearGroup || 'MYP 2';
+              return (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs text-slate-500 font-medium">
+                    Curriculum: <strong className="text-slate-800">{bp.curriculum}</strong> | Grade / Year:{' '}
+                    <strong className="text-blue-700 font-bold">{bp.yearGroup || 'MYP 2'}</strong> | Section:{' '}
+                    <strong className="text-blue-700 font-bold">{displaySection}</strong> | Rigor:{' '}
+                    <strong>{bp.difficultyLevel || 'Standard'}</strong>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMetaYearGroup(bp.yearGroup || 'MYP 2');
+                      setMetaClassSection(displaySection);
+                      setMetaTitle(bp.title || '');
+                      setMetaAssessmentDate(bp.assessmentDate || '');
+                      setMetaTimeLimit(bp.timeLimitMinutes || 45);
+                      setShowEditMetadataModal(true);
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors ml-1 cursor-pointer"
+                    title="Edit Grade, Class/Section, Title or Duration without altering questions"
+                  >
+                    <Edit3 className="w-3 h-3 text-blue-600" />
+                    <span>Edit Grade / Details</span>
+                  </button>
+                </div>
+              );
+            })()}
           </div>
           <h2 className="text-xl font-bold text-slate-900 mt-1">{bp.title}</h2>
           <p className="text-xs text-slate-600 mt-0.5">
-            Topic: <span className="font-semibold text-slate-800">{bp.topic}</span> &bull; {bp.estimatedDurationMinutes} mins &bull; {currentAssessment.questions.length} Questions &bull; {totalCalculatedMarks} Total Marks
+            Topic: <span className="font-semibold text-slate-800">{bp.topic}</span> &bull; {bp.estimatedDurationMinutes || bp.timeLimitMinutes || 45} mins &bull; {currentAssessment.questions.length} Questions &bull; {totalCalculatedMarks} Total Marks
           </p>
+          {(bp.keyConcept || bp.globalContext) && (
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              {bp.keyConcept && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-600"></span>
+                  Key Concept: {bp.keyConcept}
+                </span>
+              )}
+              {bp.globalContext && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-sky-50 text-sky-800 border border-sky-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sky-600"></span>
+                  Global Context: {bp.globalContext}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={onBack}
-            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1.5"
           >
-            &larr; Blueprint Setup
+            <Home className="w-3.5 h-3.5 text-slate-600" /> Dashboard
           </button>
 
           <button
@@ -263,6 +447,18 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
           >
             <Save className="w-3.5 h-3.5" />
             {savedDraftToast ? 'Draft Saved!' : 'Save Draft'}
+          </button>
+
+          {/* REGENERATE ENTIRE PAPER BUTTON */}
+          <button
+            type="button"
+            onClick={() => setShowRegenerateEntireModal(true)}
+            disabled={isRegeneratingEntire}
+            className="px-3.5 py-2 text-xs font-bold text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-300 rounded-lg flex items-center gap-1.5 transition-all shadow-xs"
+            title="Regenerate all questions in this paper with your custom instructions"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-purple-600 ${isRegeneratingEntire ? 'animate-spin' : ''}`} />
+            <span>{isRegeneratingEntire ? 'Regenerating Paper...' : 'Regenerate Entire Paper'}</span>
           </button>
 
           <button
@@ -287,7 +483,7 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
             className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-lg flex items-center gap-2 shadow-md hover:shadow-lg transition-all ring-2 ring-emerald-500/30"
           >
             <Send className="w-4 h-4" />
-            <span>{isPublished ? 'Update Published Task' : `Publish to Class (${bp.classSection})`}</span>
+            <span>{isPublished ? 'Update Published Task' : `Publish to Class (${effectiveClassSection})`}</span>
           </button>
         </div>
       </div>
@@ -355,6 +551,22 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
                     {q.maxMarks} Mark{q.maxMarks > 1 ? 's' : ''}
                   </span>
 
+                  {/* Edit/Add Graph & Data Table Button */}
+                  <button
+                    onClick={() => setDataEditorQuestion(q)}
+                    title={q.dataset || q.tableData ? 'Edit scientific graph and data table values' : 'Add experimental data table or graph'}
+                    className={`p-1.5 rounded transition-colors flex items-center gap-1 text-xs font-semibold ${
+                      q.dataset || q.tableData
+                        ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
+                        : 'text-slate-500 hover:text-emerald-600 hover:bg-emerald-50'
+                    }`}
+                  >
+                    <BarChart3 className="w-4 h-4 text-emerald-600" />
+                    <span className="hidden sm:inline">
+                      {q.dataset || q.tableData ? 'Edit Graph & Data' : 'Add Graph / Data'}
+                    </span>
+                  </button>
+
                   {/* Insert/Edit Diagram Button */}
                   <button
                     onClick={() => setImageEditorQuestion(q)}
@@ -370,12 +582,17 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
                   </button>
 
                   <button
-                    onClick={() => handleRegenerateSingle(q)}
+                    type="button"
+                    onClick={() => {
+                      setRegenerateModalQuestion(q);
+                      setRegenerateTeacherGuidance('');
+                    }}
                     disabled={regeneratingId === q.id}
                     title="Regenerate this question with AI"
-                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded"
+                    className="p-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded flex items-center gap-1 text-xs font-semibold"
                   >
-                    <Sparkles className={`w-4 h-4 ${regeneratingId === q.id ? 'animate-spin text-blue-600' : ''}`} />
+                    <Sparkles className={`w-3.5 h-3.5 ${regeneratingId === q.id ? 'animate-spin text-blue-600' : 'text-blue-600'}`} />
+                    <span className="hidden sm:inline">{regeneratingId === q.id ? 'Regenerating...' : 'Regenerate'}</span>
                   </button>
 
                   <button
@@ -540,47 +757,14 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
                   {/* Prompt */}
                   <div className="text-sm font-medium text-slate-900 leading-relaxed">{q.prompt}</div>
 
-                  {/* Dataset Table if data_based */}
-                  {q.dataset && (
-                    <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/50 text-xs">
-                      <div className="font-bold text-slate-800 mb-1">{q.dataset.title}</div>
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full text-left text-xs">
-                          <thead>
-                            <tr className="border-b bg-slate-100">
-                              <th className="p-1.5 font-bold">
-                                {q.dataset.xLabel} ({q.dataset.xUnit})
-                              </th>
-                              <th className="p-1.5 font-bold">
-                                {q.dataset.yLabel} ({q.dataset.yUnit})
-                              </th>
-                              {q.dataset.dataPoints[0]?.trial1 !== undefined && (
-                                <>
-                                  <th className="p-1.5 font-normal">Trial 1</th>
-                                  <th className="p-1.5 font-normal">Trial 2</th>
-                                  <th className="p-1.5 font-normal">Trial 3</th>
-                                </>
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {q.dataset.dataPoints.map((dp, idx) => (
-                              <tr key={idx} className="border-b border-slate-200">
-                                <td className="p-1.5 font-medium">{dp.x}</td>
-                                <td className="p-1.5 font-bold text-blue-700">{dp.y}</td>
-                                {dp.trial1 !== undefined && (
-                                  <>
-                                    <td className="p-1.5 text-slate-600">{dp.trial1}</td>
-                                    <td className="p-1.5 text-slate-600">{dp.trial2}</td>
-                                    <td className="p-1.5 text-slate-600">{dp.trial3}</td>
-                                  </>
-                                )}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
+                  {/* Dataset Table & Visual Graph Chart */}
+                  {(q.dataset || q.tableData) && (
+                    <ScienceGraphViewer
+                      dataset={q.dataset}
+                      tableData={q.tableData}
+                      stimulusImageUrl={q.imageUrl}
+                      isDaylight={true}
+                    />
                   )}
 
                   {/* MCQ Options if applicable */}
@@ -788,7 +972,7 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
           </div>
           <div>
             <div className="text-sm font-bold text-white flex items-center gap-2">
-              Ready to assign to {bp.classSection}?
+              Ready to assign to {effectiveClassSection}?
               {isPublished && (
                 <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
                   Live for Students
@@ -797,13 +981,23 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
             </div>
             <p className="text-xs text-slate-400">
               {isPublished
-                ? `Students in ${bp.classSection} can currently see and complete this task on their dashboard.`
-                : `Publishing makes this formative assessment instantly visible on all ${bp.classSection} student dashboards.`}
+                ? `Students in ${effectiveClassSection} can currently see and complete this task on their dashboard.`
+                : `Publishing makes this formative assessment instantly visible on all ${effectiveClassSection} student dashboards.`}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+          <button
+            type="button"
+            onClick={onBack}
+            className="px-4 py-2.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl transition-colors flex items-center gap-1.5"
+            title="Return to Faculty Dashboard"
+          >
+            <Home className="w-4 h-4 text-blue-400" />
+            Dashboard
+          </button>
+
           <button
             type="button"
             onClick={handleSaveDraftClick}
@@ -811,6 +1005,17 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
           >
             <Save className="w-4 h-4" />
             {savedDraftToast ? 'Draft Saved!' : 'Save Draft'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowRegenerateEntireModal(true)}
+            disabled={isRegeneratingEntire}
+            className="px-4 py-2.5 text-xs font-bold text-purple-200 hover:text-white bg-purple-950/80 hover:bg-purple-900 border border-purple-700/60 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
+            title="Regenerate all questions in this paper with your custom instructions"
+          >
+            <RefreshCw className={`w-4 h-4 text-purple-400 ${isRegeneratingEntire ? 'animate-spin' : ''}`} />
+            <span>{isRegeneratingEntire ? 'Regenerating Paper...' : 'Regenerate Entire Paper'}</span>
           </button>
 
           <button
@@ -828,10 +1033,337 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
             className="px-6 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 rounded-xl shadow-lg hover:shadow-emerald-500/25 flex items-center gap-2 transition-all ring-2 ring-emerald-400/40"
           >
             <Send className="w-4 h-4" />
-            <span>{isPublished ? 'Update Live Assessment' : `Publish to Class (${bp.classSection})`}</span>
+            <span>{isPublished ? 'Update Live Assessment' : `Publish to Class (${effectiveClassSection})`}</span>
           </button>
         </div>
       </div>
+
+      {/* REGENERATE ENTIRE ASSESSMENT MODAL */}
+      {showRegenerateEntireModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                  <RefreshCw className={`w-5 h-5 ${isRegeneratingEntire ? 'animate-spin text-purple-700' : ''}`} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    Regenerate Entire Question Paper
+                    <span className="text-[10px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full uppercase">
+                      AI Re-Roll
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Replace all {currentAssessment.questions.length} questions with a fresh, curriculum-authentic set.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isRegeneratingEntire}
+                onClick={() => setShowRegenerateEntireModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Assessment Specs Summary */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Curriculum</span>
+                <span className="font-bold text-slate-800">{bp.curriculum}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Topic</span>
+                <span className="font-bold text-blue-900 truncate block" title={bp.topic}>{bp.topic}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Year / Section</span>
+                <span className="font-bold text-slate-800">{bp.yearGroup} ({bp.classSection})</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Target Marks</span>
+                <span className="font-bold text-emerald-700">{bp.maxMarks || 20} Marks ({bp.targetQuestionCount || 5} Qs)</span>
+              </div>
+            </div>
+
+            {/* Teacher Guidance / Command Input */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-800 flex items-center justify-between">
+                <span>Teacher's Command / Custom Instructions for New Paper:</span>
+                <span className="text-[11px] font-normal text-slate-500">Optional</span>
+              </label>
+
+              <textarea
+                rows={3}
+                value={regenerateEntireInstructions}
+                onChange={(e) => setRegenerateEntireInstructions(e.target.value)}
+                disabled={isRegeneratingEntire}
+                placeholder="E.g., 'Make questions more experimental with realistic datasets', 'Focus on plant cells vs animal cells under osmosis', 'Include structured subparts with calculations', 'Make difficulty more challenging for high-achievers'..."
+                className="w-full border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-hidden leading-relaxed text-slate-800 bg-white"
+              />
+
+              {/* Quick Presets */}
+              <div className="space-y-1.5 pt-1">
+                <div className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-purple-600" />
+                  <span>Quick Instruction Presets:</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    '🔬 Focus on experimental design & variables',
+                    '📊 Include numerical datasets & rate calculations',
+                    '🌿 Real-world unfamiliar biological contexts',
+                    '⚡ Higher cognitive rigor & evaluation questions',
+                    '✍️ Structured examination subparts with progressive marks',
+                    '🎯 Simplified accessible wording for foundational practice',
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      disabled={isRegeneratingEntire}
+                      onClick={() => {
+                        setRegenerateEntireInstructions((prev) =>
+                          prev.trim() ? `${prev.trim()}; ${preset}` : preset
+                        );
+                      }}
+                      className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-purple-100 hover:text-purple-800 text-slate-700 border border-slate-200 transition-colors font-medium text-left"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Note & Action Buttons */}
+            <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3 text-[11px] text-purple-900 flex items-start gap-2">
+              <Sparkles className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+              <div>
+                The Chief Examiner AI will synthesize <strong>{bp.targetQuestionCount || 5} brand-new questions</strong> summing to exactly <strong>{bp.maxMarks || 20} marks</strong>, avoiding previous duplicates and adhering strictly to your mode and custom commands.
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isRegeneratingEntire}
+                onClick={() => setShowRegenerateEntireModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isRegeneratingEntire}
+                onClick={() => handleRegenerateEntirePaper()}
+                className="px-6 py-2.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 active:bg-purple-800 rounded-xl flex items-center gap-2 shadow-md hover:shadow-lg transition-all ring-2 ring-purple-400/30"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRegeneratingEntire ? 'animate-spin' : ''}`} />
+                <span>
+                  {isRegeneratingEntire
+                    ? 'Synthesizing Entire New Paper...'
+                    : regenerateEntireInstructions.trim()
+                    ? 'Regenerate Paper with Instructions'
+                    : 'Regenerate Entire Paper (Instant AI)'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI QUESTION REGENERATION MODAL */}
+      {regenerateModalQuestion && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Regenerate Question #{regenerateModalQuestion.questionNumber}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Topic: {bp.topic} &bull; {regenerateModalQuestion.maxMarks} Marks &bull; {bp.difficultyLevel || 'Standard'} Rigor
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRegenerateModalQuestion(null)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1.5">
+              <div className="text-slate-500 font-semibold uppercase text-[10px]">Current Question to Replace:</div>
+              <p className="text-slate-800 font-medium italic">"{regenerateModalQuestion.prompt}"</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Optional Teacher Guidance / Tweak Instructions:
+              </label>
+              <textarea
+                rows={3}
+                value={regenerateTeacherGuidance}
+                onChange={(e) => setRegenerateTeacherGuidance(e.target.value)}
+                placeholder="E.g., Make it more conceptual, focus on data analysis from an experiment, use simpler vocabulary for Year 9, or ask about cell membrane permeability..."
+                className="w-full border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-hidden"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Leave empty for an automatic AI replacement strictly aligned to your blueprint syllabus and year-level standards.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setRegenerateModalQuestion(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={regeneratingId === regenerateModalQuestion.id}
+                onClick={() => handleRegenerateSingle(regenerateModalQuestion, regenerateTeacherGuidance)}
+                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl flex items-center gap-2 shadow-md transition-all"
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${regeneratingId === regenerateModalQuestion.id ? 'animate-spin' : ''}`} />
+                <span>
+                  {regeneratingId === regenerateModalQuestion.id
+                    ? 'Consulting AI Examiner...'
+                    : regenerateTeacherGuidance.trim()
+                    ? 'Regenerate with Guidance'
+                    : 'Instant AI Re-roll'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT METADATA & GRADE MODAL */}
+      {showEditMetadataModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                  <Edit3 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Edit Assessment Details & Grade</h3>
+                  <p className="text-xs text-slate-500">Update grade or class without changing any questions</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditMetadataModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Grade / Year Group</label>
+                <select
+                  value={metaYearGroup}
+                  onChange={(e) => {
+                    const newYg = e.target.value;
+                    setMetaYearGroup(newYg);
+                    if (!metaClassSection || metaClassSection === 'Grade 9A' || metaClassSection === metaYearGroup) {
+                      setMetaClassSection(newYg);
+                    }
+                  }}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                >
+                  {(CURRICULA[bp.curriculum]?.yearGroups || ['MYP 1', 'MYP 2', 'MYP 3', 'MYP 4', 'MYP 5']).map(
+                    (yg) => (
+                      <option key={yg} value={yg}>
+                        {yg}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Target Class / Section</label>
+                <input
+                  type="text"
+                  value={metaClassSection}
+                  onChange={(e) => setMetaClassSection(e.target.value)}
+                  placeholder="e.g. MYP 2, MYP 2A, 7-Sci"
+                  className="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">Students will see this task assigned to this class section.</p>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Assessment Title</label>
+                <input
+                  type="text"
+                  value={metaTitle}
+                  onChange={(e) => setMetaTitle(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Assessment Date</label>
+                  <input
+                    type="date"
+                    value={metaAssessmentDate}
+                    onChange={(e) => setMetaAssessmentDate(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Time Limit (mins)</label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={180}
+                    value={metaTimeLimit}
+                    onChange={(e) => setMetaTimeLimit(Number(e.target.value))}
+                    className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => setShowEditMetadataModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveMetadata}
+                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Save Changes</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PUBLISH SUCCESS MODAL */}
       {showPublishSuccessModal && (
@@ -858,7 +1390,7 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
               </div>
               <div className="flex justify-between py-1 border-b border-slate-200">
                 <span className="text-slate-500">Assigned Class Section:</span>
-                <span className="font-bold text-blue-700">{bp.classSection}</span>
+                <span className="font-bold text-blue-700">{effectiveClassSection}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-200">
                 <span className="text-slate-500">Subject & Topic:</span>
@@ -873,7 +1405,7 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
             <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-900 flex items-start gap-2.5">
               <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold">Student Access Active:</span> Students in <strong>{bp.classSection}</strong> can now view and start this formative task directly from their Student Dashboard under <strong>{bp.subject}</strong>.
+                <span className="font-bold">Student Access Active:</span> Students in <strong>{effectiveClassSection}</strong> can now view and start this formative task directly from their Student Dashboard under <strong>{bp.subject}</strong>.
               </div>
             </div>
 
@@ -908,6 +1440,33 @@ export const AssessmentReview: React.FC<AssessmentReviewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Data & Graph Editor Modal */}
+      {dataEditorQuestion && (
+        <DataAndGraphEditorModal
+          initialDataset={dataEditorQuestion.dataset}
+          initialTableData={dataEditorQuestion.tableData}
+          onClose={() => setDataEditorQuestion(null)}
+          onSave={(updatedDataset?: DatasetSpec, updatedTableData?: TableSpec) => {
+            const updatedQuestions = currentAssessment.questions.map((item) =>
+              item.id === dataEditorQuestion.id
+                ? {
+                    ...item,
+                    dataset: updatedDataset,
+                    tableData: updatedTableData,
+                  }
+                : item
+            );
+            const newAssessment = { ...currentAssessment, questions: updatedQuestions };
+            setCurrentAssessment(newAssessment);
+            onUpdateAssessment(newAssessment);
+            onSaveDraft(newAssessment);
+            setDataEditorQuestion(null);
+            setRegenerateSuccessToast('Question graph and data table updated with 100% precision!');
+            setTimeout(() => setRegenerateSuccessToast(null), 3500);
+          }}
+        />
       )}
     </div>
   );

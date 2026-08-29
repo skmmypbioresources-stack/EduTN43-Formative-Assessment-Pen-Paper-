@@ -7,6 +7,8 @@ export interface SyllabusTopicPreset {
   subtopics: string[];
   learningObjectives: string[];
   suggestedCriterion: 'Criterion A' | 'Criterion B' | 'Criterion C' | 'Criterion D';
+  keyConcept?: string;
+  globalContext?: string;
   authenticContextSample: string;
 }
 
@@ -30,6 +32,8 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
       'Compare the presence and absence of specific organelles between specialized cells and generalized cells',
     ],
     suggestedCriterion: 'Criterion A',
+    keyConcept: 'Systems',
+    globalContext: 'Scientific and technical innovation',
     authenticContextSample:
       'Microscopic examination of specialized plant (root hair cell) and mammalian blood (erythrocyte) specimens under light and electron microscopy comparing structural adaptations to specialized physiological functions.',
   },
@@ -52,6 +56,8 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
       'Evaluate the physiological mechanism and ethical/social implications of hormonal contraceptives and in-vitro fertilization (IVF)',
     ],
     suggestedCriterion: 'Criterion A',
+    keyConcept: 'Relationships',
+    globalContext: 'Identities and relationships',
     authenticContextSample:
       'A clinical investigation measures daily serum concentrations of luteinizing hormone (LH), follicle-stimulating hormone (FSH), 17β-estradiol (estrogen), and progesterone in an adult female across a standardized 28-day menstrual cycle.',
   },
@@ -72,6 +78,8 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
       'Evaluate experimental variables in potato cylinder osmometry to minimize systematic and random measurement errors',
     ],
     suggestedCriterion: 'Criterion C',
+    keyConcept: 'Change',
+    globalContext: 'Scientific and technical innovation',
     authenticContextSample:
       'Uniform potato tissue cores (Solanum tuberosum) are immersed in sucrose solutions ranging from 0.0 mol dm⁻³ to 1.0 mol dm⁻³ to determine tissue osmolarity and water potential.',
   },
@@ -92,6 +100,8 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
       'Design a controlled investigation testing the effect of heavy metal inhibitors on enzyme activity with valid control of confounding variables',
     ],
     suggestedCriterion: 'Criterion B',
+    keyConcept: 'Relationships',
+    globalContext: 'Scientific and technical innovation',
     authenticContextSample:
       'Yeast catalase activity is investigated by collecting oxygen gas evolved over 60 seconds at controlled temperatures from 10°C to 70°C in a water bath.',
   },
@@ -111,6 +121,8 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
       'Interpret respirometer data to calculate respiratory quotients (RQ) and oxygen consumption rates in germinating seeds',
     ],
     suggestedCriterion: 'Criterion C',
+    keyConcept: 'Change',
+    globalContext: 'Globalization and sustainability',
     authenticContextSample:
       'Elodea (pondweed) shoots are placed in sodium hydrogencarbonate solution at varied distances from an LED light source to measure O₂ bubble evolution per minute.',
   },
@@ -130,6 +142,8 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
       'Evaluate genetic screening technologies and the ethical implications of CRISPR gene editing in human embryos',
     ],
     suggestedCriterion: 'Criterion D',
+    keyConcept: 'Relationships',
+    globalContext: 'Scientific and technical innovation',
     authenticContextSample:
       'Pedigree data for a family lineage expressing X-linked color blindness is analyzed across three generations to deduce maternal carrier genotypes.',
   },
@@ -150,6 +164,8 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
       'Evaluate experimental limitations in the sodium thiosulfate and hydrochloric acid disappearing cross reaction',
     ],
     suggestedCriterion: 'Criterion C',
+    keyConcept: 'Change',
+    globalContext: 'Scientific and technical innovation',
     authenticContextSample:
       'Hydrochloric acid reacts with calcium carbonate chips in a conical flask on an electronic balance to track CO₂ mass loss over 300 seconds at 0.5, 1.0, and 2.0 mol dm⁻³.',
   },
@@ -169,6 +185,8 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
       'Determine the concentration of an unknown acid from concordant titration volumes within ±0.10 cm³',
     ],
     suggestedCriterion: 'Criterion A',
+    keyConcept: 'Relationships',
+    globalContext: 'Scientific and technical innovation',
     authenticContextSample:
       'Standardized 0.100 mol dm⁻³ sodium hydroxide is titrated against 25.00 cm³ aliquots of ethanoic acid (vinegar) using phenolphthalein indicator.',
   },
@@ -190,6 +208,8 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
       'Design a light-gate inquiry to verify the relationship between accelerating force and mass on a dynamics trolley',
     ],
     suggestedCriterion: 'Criterion B',
+    keyConcept: 'Systems',
+    globalContext: 'Scientific and technical innovation',
     authenticContextSample:
       'A dynamics trolley of known mass is accelerated across a horizontal track by hanging slotted masses over a frictionless pulley with dual photogate timers.',
   },
@@ -209,6 +229,8 @@ export const SCIENCE_SYLLABUS_PRESETS: SyllabusTopicPreset[] = [
       'Calculate total equivalent resistance, branch currents, and potential drops in combination circuits',
     ],
     suggestedCriterion: 'Criterion C',
+    keyConcept: 'Systems',
+    globalContext: 'Scientific and technical innovation',
     authenticContextSample:
       'A circuit with a variable DC power supply, digital ammeter, and digital voltmeter is used to record I-V data points for a 6V filament lamp up to operating potential.',
   },

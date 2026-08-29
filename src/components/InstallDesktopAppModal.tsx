@@ -87,7 +87,7 @@ export const InstallDesktopAppModal: React.FC<InstallDesktopAppModalProps> = ({
                 </span>
               </h2>
               <p className="text-xs text-slate-300">
-                Install FormativeIQ on Windows, Mac, or Chromebook for secure lockdown assessment
+                Install EduTN43 Formative IQ on Windows, Mac, or Chromebook for secure lockdown assessment
               </p>
             </div>
           </div>

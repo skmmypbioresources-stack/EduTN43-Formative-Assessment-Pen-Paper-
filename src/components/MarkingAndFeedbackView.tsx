@@ -184,6 +184,82 @@ export const MarkingAndFeedbackView: React.FC<MarkingAndFeedbackViewProps> = ({
           </div>
         </div>
 
+        {/* Status: Pending Teacher Review Banner */}
+        {currentSubmission.status === 'Pending Teacher Review' && (
+          <div className="mt-5 bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-center gap-3">
+            <Clock className="w-5 h-5 text-amber-600 shrink-0" />
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-amber-900">
+                Pending Teacher Review & Evaluation
+              </h4>
+              <p className="text-xs text-amber-800 mt-0.5">
+                This formative assessment is configured for teacher marking. Your teacher will review your work, award question-by-question marks, and provide qualitative feedback shortly.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Teacher Feedback & Commendations Card */}
+        {currentSubmission.teacherFeedback && (
+          <div className="mt-5 bg-gradient-to-br from-indigo-50/90 via-blue-50/70 to-emerald-50/70 border-2 border-indigo-200 rounded-xl p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-indigo-200/70 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                  <Bookmark className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    Teacher's Individual Evaluation & Feedback
+                    <span className="text-[10px] font-bold bg-indigo-200 text-indigo-900 px-2 py-0.5 rounded-full uppercase">
+                      Verified
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    Evaluated by <strong>{currentSubmission.teacherFeedback.markedByTeacherName || currentSubmission.teacherName || 'Sciences Faculty'}</strong> on{' '}
+                    {new Date(currentSubmission.teacherFeedback.evaluatedAt).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {currentSubmission.teacherFeedback.overallFeedback && (
+              <div className="bg-white/90 p-3.5 rounded-lg border border-indigo-100 text-xs text-slate-800 leading-relaxed shadow-2xs">
+                <strong className="text-indigo-950 block mb-1">Teacher's Overall Summary:</strong>
+                {currentSubmission.teacherFeedback.overallFeedback}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              {currentSubmission.teacherFeedback.commendations && (
+                <div className="bg-emerald-50/80 p-3 rounded-lg border border-emerald-200 space-y-1">
+                  <strong className="text-emerald-950 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Commendations & Strengths:
+                  </strong>
+                  <p className="text-emerald-900 leading-relaxed">{currentSubmission.teacherFeedback.commendations}</p>
+                </div>
+              )}
+
+              {currentSubmission.teacherFeedback.areasForGrowth && (
+                <div className="bg-amber-50/80 p-3 rounded-lg border border-amber-200 space-y-1">
+                  <strong className="text-amber-950 flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-amber-600" /> Target Concepts for Growth:
+                  </strong>
+                  <p className="text-amber-900 leading-relaxed">{currentSubmission.teacherFeedback.areasForGrowth}</p>
+                </div>
+              )}
+
+              {currentSubmission.teacherFeedback.nextSteps && (
+                <div className="bg-blue-50/80 p-3 rounded-lg border border-blue-200 space-y-1">
+                  <strong className="text-blue-950 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-600" /> Actionable Next Steps:
+                  </strong>
+                  <p className="text-blue-900 leading-relaxed">{currentSubmission.teacherFeedback.nextSteps}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Learning Gap Diagnosis & Intervention Targets */}
         {currentSubmission.diagnosis && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">

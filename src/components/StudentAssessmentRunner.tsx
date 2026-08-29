@@ -4,6 +4,7 @@ import {
   StudentResponse,
   Submission,
   UserProfile,
+  LiveStudentSession,
 } from '../types';
 import {
   Clock,
@@ -25,8 +26,15 @@ import {
   ZoomIn,
   Image as ImageIcon,
   Lock,
+  Sun,
+  Moon,
+  Radio,
+  MessageSquare,
+  X,
 } from 'lucide-react';
+import { StorageService } from '../services/storageService';
 import { ImageLightboxModal } from './ImageLightboxModal';
+import { ScienceGraphViewer } from './ScienceGraphViewer';
 
 interface StudentAssessmentRunnerProps {
   assessment: FormativeAssessment;
@@ -63,6 +71,11 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
   const [lastSavedTime, setLastSavedTime] = useState<string>('Just now');
   const [showSubmitConfirm, setShowSubmitConfirm] = useState<boolean>(false);
 
+  // Time remaining
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(
+    (bp.timeLimitMinutes || 45) * 60
+  );
+
   // --- LOCKDOWN & ACADEMIC INTEGRITY STATE ---
   const [tabSwitchCount, setTabSwitchCount] = useState<number>(
     existingSubmission?.integrityAudit?.tabSwitchCount || 0
@@ -81,15 +94,147 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
     existingSubmission?.integrityAudit?.logs || []
   );
 
+  // Real-time Teacher Proctor Direct Alert to Student
+  const [activeTeacherAlertMessage, setActiveTeacherAlertMessage] = useState<string | null>(null);
+  const awayStartTimestampRef = useRef<number | null>(null);
+  const totalAwaySecondsRef = useRef<number>(0);
+  const syncDebounceTimerRef = useRef<any>(null);
+
+  // Generate deterministic session ID
+  const studentSafeId = (studentUser.id || studentUser.name || 'student')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_');
+  const sessionId = `${assessment.id}_${studentSafeId}`;
+
+  // Helper to log security infractions
+  const recordIntegrityEvent = useCallback((event: string, details: string) => {
+    const newLog = {
+      timestamp: new Date().toLocaleTimeString(),
+      event,
+      details,
+    };
+    setIntegrityLogs((prev) => [...prev, newLog]);
+  }, []);
+
+  // Real-time Keystroke & State Streamer to Teacher Proctor Dashboard
+  const pushLiveSession = useCallback(
+    (customOverrides: Partial<LiveStudentSession> = {}) => {
+      const currentQuestion = assessment.questions[currentQIndex];
+      const answered = (Object.values(responses) as StudentResponse[]).filter(
+        (r) => (r.textAnswer && r.textAnswer.trim().length > 0) || r.selectedOptionId !== undefined
+      ).length;
+
+      const activeResp = responses[currentQuestion?.id];
+      const activeDraft = activeResp?.textAnswer || (activeResp?.selectedOptionId ? `[Selected Option ${activeResp.selectedOptionId}]` : '');
+
+      const sessionPayload: LiveStudentSession = {
+        id: sessionId,
+        formativeId: assessment.id,
+        formativeTitle: assessment.blueprint.title || 'Science Formative Task',
+        classSection: assessment.blueprint.classSection || 'MYP 2',
+        studentId: studentUser.id || studentSafeId,
+        studentName: studentUser.name || 'Student',
+        startedAt: existingSubmission?.startedAt || new Date().toISOString(),
+        lastActiveAt: new Date().toISOString(),
+        currentQuestionIndex: currentQIndex,
+        totalQuestions: assessment.questions.length,
+        answeredQuestionsCount: answered,
+        currentQuestionId: currentQuestion?.id || '',
+        currentTypedDraft: activeDraft,
+        responses: responses,
+        status: customOverrides.status || (document.hidden ? 'tab_switched' : 'active'),
+        timeRemainingSeconds: secondsRemaining,
+        integrityAudit: {
+          tabSwitchCount,
+          copyPasteAttempts,
+          isLockdownViolated: tabSwitchCount > 0 || copyPasteAttempts > 0,
+          fullscreenExitCount,
+          awayDurationSeconds: totalAwaySecondsRef.current,
+          isCurrentlyAway: !!awayStartTimestampRef.current,
+          logs: integrityLogs,
+          ...customOverrides.integrityAudit,
+        },
+        ...customOverrides,
+      };
+
+      StorageService.saveLiveSession(sessionPayload);
+    },
+    [
+      assessment,
+      currentQIndex,
+      responses,
+      secondsRemaining,
+      sessionId,
+      studentSafeId,
+      studentUser,
+      tabSwitchCount,
+      copyPasteAttempts,
+      fullscreenExitCount,
+      integrityLogs,
+      existingSubmission,
+    ]
+  );
+
+  // Debounced real-time streaming for rapid keystrokes (200ms)
+  const streamDebounced = useCallback(
+    (overrides?: Partial<LiveStudentSession>) => {
+      if (syncDebounceTimerRef.current) clearTimeout(syncDebounceTimerRef.current);
+      syncDebounceTimerRef.current = setTimeout(() => {
+        pushLiveSession(overrides);
+      }, 200);
+    },
+    [pushLiveSession]
+  );
+
+  // Subscribe to live session updates to receive immediate Teacher Proctor Alerts
+  useEffect(() => {
+    const unsub = StorageService.subscribeToLiveSessions((sessions) => {
+      const mySession = sessions[sessionId];
+      if (mySession && mySession.activeTeacherAlert && mySession.activeTeacherAlert !== activeTeacherAlertMessage) {
+        setActiveTeacherAlertMessage(mySession.activeTeacherAlert);
+      }
+    });
+
+    // Initial session registration
+    pushLiveSession({ status: 'active' });
+
+    return () => {
+      unsub();
+      if (syncDebounceTimerRef.current) clearTimeout(syncDebounceTimerRef.current);
+    };
+  }, [sessionId]);
+
+  // Sync whenever question changes or responses update
+  useEffect(() => {
+    streamDebounced();
+  }, [currentQIndex, responses, streamDebounced]);
+
   // Lightbox modal for question diagram
   const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
   const [lightboxCaption, setLightboxCaption] = useState<string | undefined>(undefined);
   const [lightboxAlt, setLightboxAlt] = useState<string | undefined>(undefined);
 
-  // Time remaining
-  const [secondsRemaining, setSecondsRemaining] = useState<number>(
-    (bp.timeLimitMinutes || 45) * 60
-  );
+  // Theme Mode (Daylight vs Dark)
+  const [runnerTheme, setRunnerTheme] = useState<'light' | 'dark'>(() => StorageService.getTheme());
+  
+  useEffect(() => {
+    const handleThemeChange = (e: any) => {
+      if (e.detail?.theme) {
+        setRunnerTheme(e.detail.theme);
+      } else {
+        setRunnerTheme(StorageService.getTheme());
+      }
+    };
+    window.addEventListener('storage-theme-change', handleThemeChange);
+    return () => window.removeEventListener('storage-theme-change', handleThemeChange);
+  }, []);
+
+  const toggleRunnerTheme = () => {
+    const next = runnerTheme === 'dark' ? 'light' : 'dark';
+    setRunnerTheme(next);
+    StorageService.setTheme(next);
+  };
+  const isDaylight = runnerTheme === 'light';
 
   // Toast timer ref
   const toastTimeoutRef = useRef<any>(null);
@@ -101,16 +246,6 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
       setSecurityToast(null);
     }, 4000);
   };
-
-  // Helper to log security infractions
-  const recordIntegrityEvent = useCallback((event: string, details: string) => {
-    const newLog = {
-      timestamp: new Date().toLocaleTimeString(),
-      event,
-      details,
-    };
-    setIntegrityLogs((prev) => [...prev, newLog]);
-  }, []);
 
   // Request fullscreen mode
   const enterFullscreen = useCallback(() => {
@@ -203,35 +338,133 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
     const handleVisibilityChange = () => {
       if (document.hidden) {
         // Student switched tab or minimized window
+        awayStartTimestampRef.current = Date.now();
         setTabSwitchCount((prev) => {
           const newCount = prev + 1;
-          recordIntegrityEvent(
-            `Tab Switch #${newCount}`,
-            `Student switched to another browser tab or minimized the assessment window.`
-          );
+          const msg = `Student navigated away to another browser tab or minimized window.`;
+          recordIntegrityEvent(`Tab Switch #${newCount}`, msg);
           setLockdownWarningMessage(
             `Tab switch detected! Leaving the assessment window is strictly prohibited. This infraction (Violation #${newCount}) has been recorded in your integrity audit report.`
           );
           setShowLockdownWarning(true);
+
+          pushLiveSession({
+            status: 'tab_switched',
+            integrityAudit: {
+              tabSwitchCount: newCount,
+              copyPasteAttempts,
+              isLockdownViolated: true,
+              fullscreenExitCount,
+              awayDurationSeconds: totalAwaySecondsRef.current,
+              isCurrentlyAway: true,
+              awayStartedAt: new Date().toISOString(),
+              logs: [
+                ...integrityLogs,
+                { timestamp: new Date().toLocaleTimeString(), event: `Tab Switch #${newCount}`, details: msg },
+              ],
+            },
+          });
+
+          return newCount;
+        });
+      } else {
+        // Student returned to tab
+        if (awayStartTimestampRef.current) {
+          const elapsedSecs = Math.max(1, Math.round((Date.now() - awayStartTimestampRef.current) / 1000));
+          totalAwaySecondsRef.current += elapsedSecs;
+          awayStartTimestampRef.current = null;
+
+          recordIntegrityEvent(
+            'Returned to Assessment',
+            `Student returned after being away from window for ${elapsedSecs} seconds.`
+          );
+
+          pushLiveSession({
+            status: 'active',
+            integrityAudit: {
+              tabSwitchCount,
+              copyPasteAttempts,
+              isLockdownViolated: tabSwitchCount > 0 || copyPasteAttempts > 0,
+              fullscreenExitCount,
+              awayDurationSeconds: totalAwaySecondsRef.current,
+              isCurrentlyAway: false,
+              logs: [
+                ...integrityLogs,
+                {
+                  timestamp: new Date().toLocaleTimeString(),
+                  event: 'Returned to Assessment',
+                  details: `Student returned after ${elapsedSecs} seconds away.`,
+                },
+              ],
+            },
+          });
+        }
+      }
+    };
+
+    const handleWindowBlur = () => {
+      if (!document.hidden) {
+        awayStartTimestampRef.current = Date.now();
+        setTabSwitchCount((prev) => {
+          const newCount = prev + 1;
+          const msg = `Student focused on another application or multi-tasked outside the assessment.`;
+          recordIntegrityEvent(`Window Focus Lost #${newCount}`, msg);
+          setLockdownWarningMessage(
+            `Application focus departure detected! You navigated away from the assessment window (Violation #${newCount}).`
+          );
+          setShowLockdownWarning(true);
+
+          pushLiveSession({
+            status: 'focus_lost',
+            integrityAudit: {
+              tabSwitchCount: newCount,
+              copyPasteAttempts,
+              isLockdownViolated: true,
+              fullscreenExitCount,
+              awayDurationSeconds: totalAwaySecondsRef.current,
+              isCurrentlyAway: true,
+              awayStartedAt: new Date().toISOString(),
+              logs: [
+                ...integrityLogs,
+                { timestamp: new Date().toLocaleTimeString(), event: `Focus Lost #${newCount}`, details: msg },
+              ],
+            },
+          });
+
           return newCount;
         });
       }
     };
 
-    const handleWindowBlur = () => {
-      // When window loses focus (e.g. switching application or split screen)
-      if (!document.hidden) {
-        setTabSwitchCount((prev) => {
-          const newCount = prev + 1;
-          recordIntegrityEvent(
-            `Window Focus Lost #${newCount}`,
-            `Student focused on another application or multi-tasked outside the assessment.`
-          );
-          setLockdownWarningMessage(
-            `Application focus departure detected! You navigated away from the assessment window (Violation #${newCount}).`
-          );
-          setShowLockdownWarning(true);
-          return newCount;
+    const handleWindowFocus = () => {
+      if (awayStartTimestampRef.current) {
+        const elapsedSecs = Math.max(1, Math.round((Date.now() - awayStartTimestampRef.current) / 1000));
+        totalAwaySecondsRef.current += elapsedSecs;
+        awayStartTimestampRef.current = null;
+
+        recordIntegrityEvent(
+          'Refocused Window',
+          `Window focus returned after ${elapsedSecs} seconds away.`
+        );
+
+        pushLiveSession({
+          status: 'active',
+          integrityAudit: {
+            tabSwitchCount,
+            copyPasteAttempts,
+            isLockdownViolated: tabSwitchCount > 0 || copyPasteAttempts > 0,
+            fullscreenExitCount,
+            awayDurationSeconds: totalAwaySecondsRef.current,
+            isCurrentlyAway: false,
+            logs: [
+              ...integrityLogs,
+              {
+                timestamp: new Date().toLocaleTimeString(),
+                event: 'Refocused Window',
+                details: `Student refocused after ${elapsedSecs}s.`,
+              },
+            ],
+          },
         });
       }
     };
@@ -253,6 +486,7 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
     // Initial fullscreen attempt
@@ -261,9 +495,10 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
-  }, [recordIntegrityEvent, enterFullscreen]);
+  }, [recordIntegrityEvent, enterFullscreen, pushLiveSession, tabSwitchCount, copyPasteAttempts, fullscreenExitCount, integrityLogs]);
 
   const formatTimer = (totalSecs: number) => {
     const mins = Math.floor(totalSecs / 60);
@@ -319,13 +554,27 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
       logs: integrityLogs,
     };
 
+    // Update live session to submitted status
+    pushLiveSession({
+      status: 'submitted',
+      integrityAudit: {
+        ...integrityReport,
+        awayDurationSeconds: totalAwaySecondsRef.current,
+        isCurrentlyAway: false,
+      },
+    });
+
     onSubmitAssessment(responses, integrityReport);
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col select-none">
+    <div className={`min-h-screen flex flex-col select-none transition-colors ${
+      isDaylight ? 'bg-slate-100 text-slate-900' : 'bg-slate-950 text-slate-100'
+    }`}>
       {/* Top Examination Bar with Lockdown Status */}
-      <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-40 shadow-md">
+      <header className={`px-4 py-3 sticky top-0 z-40 shadow-sm border-b transition-colors ${
+        isDaylight ? 'bg-white border-slate-200 text-slate-900' : 'bg-slate-900 border-slate-800 text-white shadow-md'
+      }`}>
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded bg-blue-600 flex items-center justify-center font-bold text-white text-xs shadow-xs">
@@ -333,13 +582,15 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-sm font-bold text-white truncate max-w-xs sm:max-w-md">{bp.title}</h1>
-                <span className="hidden sm:inline-flex items-center gap-1 bg-emerald-950 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-700/60">
-                  <ShieldCheck className="w-3 h-3 text-emerald-400" /> Lockdown Active
+                <h1 className={`text-sm font-bold truncate max-w-xs sm:max-w-md ${isDaylight ? 'text-slate-900' : 'text-white'}`}>{bp.title}</h1>
+                <span className={`hidden sm:inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded border ${
+                  isDaylight ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-emerald-950 text-emerald-300 border-emerald-700/60'
+                }`}>
+                  <ShieldCheck className="w-3 h-3 text-emerald-500" /> Lockdown Active
                 </span>
               </div>
-              <div className="text-xs text-slate-400">
-                Student: <span className="text-slate-200 font-medium">{studentUser.name}</span> ({bp.classSection})
+              <div className={`text-xs ${isDaylight ? 'text-slate-500' : 'text-slate-400'}`}>
+                Student: <span className={`font-medium ${isDaylight ? 'text-slate-800' : 'text-slate-200'}`}>{studentUser.name}</span> ({bp.classSection})
               </div>
             </div>
           </div>
@@ -353,8 +604,36 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
               </div>
             )}
 
+            {/* Daylight / Dark Mode Toggle */}
+            <button
+              type="button"
+              onClick={toggleRunnerTheme}
+              className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                isDaylight
+                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+              }`}
+              title={isDaylight ? 'Switch to Midnight Dark Mode' : 'Switch to Daylight Light Mode'}
+            >
+              {isDaylight ? (
+                <>
+                  <Moon className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="hidden sm:inline">Dark</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">Daylight</span>
+                </>
+              )}
+            </button>
+
             {/* Timer */}
-            <div className="flex items-center gap-1.5 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 font-mono text-xs sm:text-sm text-amber-400">
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-mono text-xs sm:text-sm font-bold ${
+              isDaylight
+                ? 'bg-amber-50 border-amber-200 text-amber-900'
+                : 'bg-slate-800 border-slate-700 text-amber-400'
+            }`}>
               <Clock className="w-4 h-4" />
               <span>{formatTimer(secondsRemaining)}</span>
             </div>
@@ -363,14 +642,18 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
             <button
               onClick={enterFullscreen}
               title="Ensure Fullscreen Lockdown Mode"
-              className="hidden sm:flex items-center gap-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg border border-slate-700"
+              className={`hidden sm:flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border ${
+                isDaylight
+                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+              }`}
             >
               <Maximize className="w-3.5 h-3.5" />
             </button>
 
             {/* Autosave Status */}
-            <div className="hidden md:flex items-center gap-1 text-xs text-slate-400">
-              <Save className="w-3.5 h-3.5 text-emerald-400" />
+            <div className={`hidden md:flex items-center gap-1 text-xs ${isDaylight ? 'text-slate-500' : 'text-slate-400'}`}>
+              <Save className="w-3.5 h-3.5 text-emerald-500" />
               <span>Autosaved</span>
             </div>
 
@@ -385,6 +668,25 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
         </div>
       </header>
 
+      {/* Real-time Teacher Proctor Direct Alert / Message */}
+      {activeTeacherAlertMessage && (
+        <div className="bg-amber-500 text-slate-950 px-4 py-3 shadow-lg border-b border-amber-600 flex items-center justify-between animate-pulse">
+          <div className="max-w-5xl mx-auto w-full flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs sm:text-sm font-bold">
+              <Radio className="w-4 h-4 text-rose-900 animate-ping" />
+              <span>Direct Teacher Proctor Notice:</span>
+              <span className="font-medium text-slate-900">{activeTeacherAlertMessage}</span>
+            </div>
+            <button
+              onClick={() => setActiveTeacherAlertMessage(null)}
+              className="px-2.5 py-1 bg-slate-950 text-white rounded text-xs font-bold hover:bg-slate-800 transition-colors flex items-center gap-1 shrink-0"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Acknowledge
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Security Toast Warning */}
       {securityToast && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-rose-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 border border-rose-400 animate-bounce">
@@ -396,10 +698,14 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
       {/* Main Question Arena */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
         {/* Left: Question Navigation Drawer */}
-        <aside className="md:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-4 h-fit space-y-4">
-          <div className="flex items-center justify-between text-xs font-bold uppercase text-slate-400 tracking-wider">
+        <aside className={`md:col-span-1 border rounded-xl p-4 h-fit space-y-4 shadow-xs transition-colors ${
+          isDaylight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
+        }`}>
+          <div className={`flex items-center justify-between text-xs font-bold uppercase tracking-wider ${
+            isDaylight ? 'text-slate-500' : 'text-slate-400'
+          }`}>
             <span>Questions</span>
-            <span className="text-blue-400">{answeredCount}/{assessment.questions.length}</span>
+            <span className="text-blue-600 font-bold">{answeredCount}/{assessment.questions.length}</span>
           </div>
 
           <div className="grid grid-cols-5 gap-2">
@@ -416,15 +722,19 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
                   onClick={() => setCurrentQIndex(idx)}
                   className={`h-9 rounded-lg font-bold text-xs flex items-center justify-center relative transition-all ${
                     isCurrent
-                      ? 'bg-blue-600 text-white ring-2 ring-blue-400'
+                      ? 'bg-blue-600 text-white ring-2 ring-blue-400 shadow-xs'
                       : isAnswered
-                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                      ? isDaylight
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                        : 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                      : isDaylight
+                      ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
                       : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                   }`}
                 >
                   {idx + 1}
                   {isFlagged && (
-                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full" />
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full ring-1 ring-white" />
                   )}
                 </button>
               );
@@ -432,53 +742,69 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
           </div>
 
           {/* Academic Integrity & Lockdown Badges */}
-          <div className="pt-3 border-t border-slate-800 text-[11px] text-slate-400 space-y-2">
-            <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+          <div className={`pt-3 border-t text-[11px] space-y-2 ${
+            isDaylight ? 'border-slate-200 text-slate-600' : 'border-slate-800 text-slate-400'
+          }`}>
+            <div className="flex items-center gap-1.5 text-emerald-600 font-semibold">
               <Lock className="w-3.5 h-3.5" />
               <span>Copy/Paste Disabled</span>
             </div>
-            <div className="flex items-center gap-1.5 text-blue-400 font-semibold">
+            <div className="flex items-center gap-1.5 text-blue-600 font-semibold">
               <ShieldAlert className="w-3.5 h-3.5" />
               <span>Tab Switching Monitored</span>
             </div>
           </div>
 
           {/* Instructions summary */}
-          <div className="pt-3 border-t border-slate-800 text-xs text-slate-400 space-y-1">
+          <div className={`pt-3 border-t text-xs space-y-1 ${
+            isDaylight ? 'border-slate-200 text-slate-600' : 'border-slate-800 text-slate-400'
+          }`}>
             <div>
-              <strong className="text-slate-300">Topic:</strong> {bp.topic}
+              <strong className={isDaylight ? 'text-slate-800' : 'text-slate-300'}>Topic:</strong> {bp.topic}
             </div>
             <div>
-              <strong className="text-slate-300">Marks:</strong> {currentQ.maxMarks} Marks
+              <strong className={isDaylight ? 'text-slate-800' : 'text-slate-300'}>Marks:</strong> {currentQ.maxMarks} Marks
             </div>
             {bp.selectedCriterion && (
               <div>
-                <strong className="text-slate-300">Criterion:</strong> {bp.selectedCriterion}
+                <strong className={isDaylight ? 'text-slate-800' : 'text-slate-300'}>Criterion:</strong> {bp.selectedCriterion}
               </div>
             )}
           </div>
         </aside>
 
         {/* Right: Active Question Arena */}
-        <section className="md:col-span-3 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between space-y-6">
+        <section className={`md:col-span-3 border rounded-xl p-6 flex flex-col justify-between space-y-6 shadow-xs transition-colors ${
+          isDaylight ? 'bg-white border-slate-200 text-slate-900' : 'bg-slate-900 border-slate-800 text-slate-100'
+        }`}>
           <div className="space-y-4">
             {/* Header with Command Term Badge */}
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className={`flex items-center justify-between border-b pb-3 ${
+              isDaylight ? 'border-slate-200' : 'border-slate-800'
+            }`}>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-blue-400">
+                <span className="text-sm font-bold text-blue-600">
                   Question {currentQ.questionNumber} of {assessment.questions.length}
                 </span>
-                <span className="bg-slate-800 text-slate-300 text-xs font-semibold px-2.5 py-0.5 rounded border border-slate-700">
+                <span className={`text-xs font-semibold px-2.5 py-0.5 rounded border ${
+                  isDaylight
+                    ? 'bg-slate-100 text-slate-800 border-slate-300'
+                    : 'bg-slate-800 text-slate-300 border-slate-700'
+                }`}>
                   Command Term: {currentQ.commandTerm}
                 </span>
-                <span className="text-xs text-slate-400 font-medium">({currentQ.maxMarks} Marks)</span>
+                <span className={`text-xs font-medium ${isDaylight ? 'text-slate-500' : 'text-slate-400'}`}>
+                  ({currentQ.maxMarks} Marks)
+                </span>
               </div>
 
               <button
                 onClick={() => setActiveFlagModalQId(currentQ.id)}
                 className={`text-xs px-2.5 py-1 rounded flex items-center gap-1 border transition-colors ${
                   currentResp.flagged
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    ? 'bg-amber-500/20 text-amber-700 border-amber-500/40 font-semibold'
+                    : isDaylight
+                    ? 'text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-100'
                     : 'text-slate-400 hover:text-white border-slate-800 hover:bg-slate-800'
                 }`}
               >
@@ -489,17 +815,23 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
 
             {/* Context/Scenario if present */}
             {currentQ.context && (
-              <div className="bg-slate-950 border-l-2 border-blue-500 p-3 rounded-r text-xs text-slate-300 leading-relaxed">
-                <strong className="text-blue-300">Practical Scenario:</strong> {currentQ.context}
+              <div className={`border-l-4 border-blue-600 p-3.5 rounded-r text-xs leading-relaxed ${
+                isDaylight ? 'bg-blue-50/70 text-slate-800' : 'bg-slate-950 text-slate-300'
+              }`}>
+                <strong className={isDaylight ? 'text-blue-900' : 'text-blue-300'}>Practical Scenario:</strong> {currentQ.context}
               </div>
             )}
 
             {/* --- QUESTION IMAGE / DIAGRAM RENDERER --- */}
             {currentQ.imageUrl && (
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+              <div className={`border rounded-xl p-4 space-y-2 ${
+                isDaylight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'
+              }`}>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                    <ImageIcon className="w-4 h-4 text-blue-400" /> Reference Scientific Diagram
+                  <span className={`text-xs font-bold flex items-center gap-1.5 ${
+                    isDaylight ? 'text-slate-800' : 'text-slate-300'
+                  }`}>
+                    <ImageIcon className="w-4 h-4 text-blue-600" /> Reference Scientific Diagram
                   </span>
                   <button
                     type="button"
@@ -508,7 +840,11 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
                       setLightboxCaption(currentQ.imageCaption);
                       setLightboxAlt(currentQ.imageAlt || `Question ${currentQ.questionNumber} Diagram`);
                     }}
-                    className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 bg-blue-950/60 hover:bg-blue-900/60 border border-blue-800/60 px-2.5 py-1 rounded-lg transition-colors"
+                    className={`text-xs flex items-center gap-1 border px-2.5 py-1 rounded-lg transition-colors font-medium ${
+                      isDaylight
+                        ? 'text-blue-700 bg-blue-50 hover:bg-blue-100 border-blue-200'
+                        : 'text-blue-400 hover:text-blue-300 bg-blue-950/60 hover:bg-blue-900/60 border-blue-800/60'
+                    }`}
                   >
                     <ZoomIn className="w-3.5 h-3.5" /> Click to Zoom / Inspect
                   </button>
@@ -520,7 +856,7 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
                     setLightboxCaption(currentQ.imageCaption);
                     setLightboxAlt(currentQ.imageAlt || `Question ${currentQ.questionNumber} Diagram`);
                   }}
-                  className="max-h-72 w-full bg-white rounded-lg p-3 flex items-center justify-center cursor-zoom-in overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all"
+                  className="max-h-72 w-full bg-white rounded-lg p-3 flex items-center justify-center cursor-zoom-in overflow-hidden hover:ring-2 hover:ring-blue-500 border border-slate-200 transition-all"
                 >
                   <img
                     src={currentQ.imageUrl}
@@ -530,7 +866,7 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
                 </div>
 
                 {currentQ.imageCaption && (
-                  <p className="text-xs text-slate-400 italic text-center pt-1">
+                  <p className={`text-xs italic text-center pt-1 ${isDaylight ? 'text-slate-500' : 'text-slate-400'}`}>
                     {currentQ.imageCaption}
                   </p>
                 )}
@@ -538,49 +874,20 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
             )}
 
             {/* Prompt */}
-            <div className="text-base font-medium text-slate-100 leading-relaxed">{currentQ.prompt}</div>
+            <div className={`text-base font-semibold leading-relaxed ${
+              isDaylight ? 'text-slate-900' : 'text-slate-100'
+            }`}>
+              {currentQ.prompt}
+            </div>
 
             {/* Dataset table or Graph visualization if applicable */}
-            {currentQ.dataset && (
-              <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
-                <div className="text-xs font-bold text-slate-200">{currentQ.dataset.title}</div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-left text-xs text-slate-300">
-                    <thead>
-                      <tr className="border-b border-slate-700 bg-slate-800/60 text-slate-200">
-                        <th className="p-2 font-bold">
-                          {currentQ.dataset.xLabel} ({currentQ.dataset.xUnit})
-                        </th>
-                        <th className="p-2 font-bold">
-                          {currentQ.dataset.yLabel} ({currentQ.dataset.yUnit})
-                        </th>
-                        {currentQ.dataset.dataPoints[0]?.trial1 !== undefined && (
-                          <>
-                            <th className="p-2 font-normal">Trial 1</th>
-                            <th className="p-2 font-normal">Trial 2</th>
-                            <th className="p-2 font-normal">Trial 3</th>
-                          </>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {currentQ.dataset.dataPoints.map((dp, i) => (
-                        <tr key={i} className="border-b border-slate-800 hover:bg-slate-800/40">
-                          <td className="p-2 font-medium text-slate-200">{dp.x}</td>
-                          <td className="p-2 font-bold text-blue-400">{dp.y}</td>
-                          {dp.trial1 !== undefined && (
-                            <>
-                              <td className="p-2 text-slate-400">{dp.trial1}</td>
-                              <td className="p-2 text-slate-400">{dp.trial2}</td>
-                              <td className="p-2 text-slate-400">{dp.trial3}</td>
-                            </>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+            {(currentQ.dataset || currentQ.tableData) && (
+              <ScienceGraphViewer
+                dataset={currentQ.dataset}
+                tableData={currentQ.tableData}
+                stimulusImageUrl={currentQ.imageUrl}
+                isDaylight={isDaylight}
+              />
             )}
 
             {/* MCQ Input Type */}
@@ -592,23 +899,31 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
                     <div
                       key={opt.id}
                       onClick={() => updateResponse({ selectedOptionId: opt.id })}
-                      className={`p-3.5 rounded-lg border text-xs cursor-pointer flex items-center justify-between transition-all ${
+                      className={`p-3.5 rounded-xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
                         isSelected
-                          ? 'border-blue-500 bg-blue-600/20 text-white font-semibold'
+                          ? isDaylight
+                            ? 'border-blue-600 bg-blue-50 text-blue-950 font-bold ring-2 ring-blue-400/50'
+                            : 'border-blue-500 bg-blue-600/20 text-white font-semibold'
+                          : isDaylight
+                          ? 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800'
                           : 'border-slate-800 bg-slate-950/60 hover:bg-slate-800 text-slate-300'
                       }`}
                     >
                       <div className="flex items-center gap-3">
                         <span
                           className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${
-                            isSelected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'
+                            isSelected
+                              ? 'bg-blue-600 text-white'
+                              : isDaylight
+                              ? 'bg-slate-200 text-slate-700'
+                              : 'bg-slate-800 text-slate-400'
                           }`}
                         >
                           {opt.id}
                         </span>
-                        <span>{opt.text}</span>
+                        <span className="text-sm">{opt.text}</span>
                       </div>
-                      {isSelected && <CheckCircle2 className="w-4 h-4 text-blue-400" />}
+                      {isSelected && <CheckCircle2 className="w-4 h-4 text-blue-600" />}
                     </div>
                   );
                 })}
@@ -619,10 +934,14 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
             {currentQ.type !== 'mcq' && (
               <div className="space-y-2 pt-2">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-slate-400">
+                  <label className={`block text-xs font-bold ${
+                    isDaylight ? 'text-slate-700' : 'text-slate-400'
+                  }`}>
                     Your Scientific Response ({currentQ.commandTerm} requirement):
                   </label>
-                  <span className="text-[10px] text-amber-400/80 font-medium">
+                  <span className={`text-[10px] font-medium ${
+                    isDaylight ? 'text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200' : 'text-amber-400/80'
+                  }`}>
                     🔒 Direct typing required (Clipboard paste disabled)
                   </span>
                 </div>
@@ -631,9 +950,15 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
                   placeholder={`Write your complete, evidence-based answer here. Ensure all units, working, and scientific explanations are included...`}
                   value={currentResp.textAnswer || ''}
                   onChange={(e) => updateResponse({ textAnswer: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono leading-relaxed select-text"
+                  className={`w-full rounded-xl p-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono leading-relaxed select-text border transition-colors ${
+                    isDaylight
+                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white'
+                      : 'bg-slate-950 border-slate-700 text-slate-100'
+                  }`}
                 />
-                <div className="text-right text-[11px] text-slate-500">
+                <div className={`text-right text-[11px] ${
+                  isDaylight ? 'text-slate-500' : 'text-slate-500'
+                }`}>
                   {(currentResp.textAnswer || '').length} characters entered
                 </div>
               </div>
@@ -641,34 +966,55 @@ export const StudentAssessmentRunner: React.FC<StudentAssessmentRunnerProps> = (
           </div>
 
           {/* Navigation Controls */}
-          <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+          <div className={`flex items-center justify-between pt-4 border-t ${
+            isDaylight ? 'border-slate-200' : 'border-slate-800'
+          }`}>
             <button
               disabled={currentQIndex === 0}
               onClick={() => setCurrentQIndex(currentQIndex - 1)}
-              className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 border ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-colors ${
                 currentQIndex === 0
-                  ? 'border-slate-800 text-slate-600 cursor-not-allowed'
+                  ? isDaylight
+                    ? 'border-slate-200 text-slate-300 cursor-not-allowed bg-slate-50'
+                    : 'border-slate-800 text-slate-600 cursor-not-allowed'
+                  : isDaylight
+                  ? 'border-slate-300 text-slate-700 bg-white hover:bg-slate-100 shadow-xs'
                   : 'border-slate-700 text-slate-300 hover:bg-slate-800'
               }`}
             >
               <ChevronLeft className="w-4 h-4" /> Previous
             </button>
 
-            {currentQIndex < assessment.questions.length - 1 ? (
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setCurrentQIndex(currentQIndex + 1)}
-                className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5"
+                type="button"
+                onClick={toggleRunnerTheme}
+                className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium flex items-center gap-1 sm:hidden ${
+                  isDaylight
+                    ? 'bg-slate-100 text-slate-700 border-slate-300'
+                    : 'bg-slate-800 text-slate-300 border-slate-700'
+                }`}
               >
-                Next Question <ChevronRight className="w-4 h-4" />
+                {isDaylight ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
+                <span>{isDaylight ? 'Dark' : 'Daylight'}</span>
               </button>
-            ) : (
-              <button
-                onClick={() => setShowSubmitConfirm(true)}
-                className="px-6 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md"
-              >
-                Review & Submit <Send className="w-4 h-4" />
-              </button>
-            )}
+
+              {currentQIndex < assessment.questions.length - 1 ? (
+                <button
+                  onClick={() => setCurrentQIndex(currentQIndex + 1)}
+                  className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
+                >
+                  Next Question <ChevronRight className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowSubmitConfirm(true)}
+                  className="px-6 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-md transition-colors"
+                >
+                  Finish & Submit <Send className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
         </section>
       </main>

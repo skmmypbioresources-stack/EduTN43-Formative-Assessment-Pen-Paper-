@@ -29,15 +29,15 @@ interface ClassAnalyticsViewProps {
 }
 
 export const ClassAnalyticsView: React.FC<ClassAnalyticsViewProps> = ({
-  assessments,
-  submissions,
+  assessments = [],
+  submissions = [],
   onSelectSubmission,
 }) => {
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>(
-    assessments[0]?.id || ''
+    assessments?.[0]?.id || ''
   );
 
-  const selectedAssessment = assessments.find((a) => a.id === selectedAssessmentId) || assessments[0];
+  const selectedAssessment = assessments?.find((a) => a.id === selectedAssessmentId) || assessments?.[0];
   const assessmentSubmissions = submissions.filter(
     (s) => s.formativeId === selectedAssessmentId
   );
@@ -323,7 +323,7 @@ export const ClassAnalyticsView: React.FC<ClassAnalyticsViewProps> = ({
               {assessmentSubmissions.map((sub) => {
                 const sTotal = sub.totalMarksAwarded ?? 0;
                 const sPct = Math.round((sTotal / maxMarks) * 100);
-                const firstGap = sub.diagnosis?.learningGaps[0]?.gap || 'None';
+                const firstGap = sub.diagnosis?.learningGaps?.[0]?.gap || 'None';
 
                 return (
                   <tr key={sub.id} className="border-b border-slate-100 hover:bg-slate-50">

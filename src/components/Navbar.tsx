@@ -1,6 +1,6 @@
 import React from 'react';
 import { UserProfile } from '../types';
-import { BookOpen, FileSpreadsheet, Lock, Unlock, GraduationCap, User, LogOut, Download, Laptop } from 'lucide-react';
+import { BookOpen, FileSpreadsheet, Lock, Unlock, GraduationCap, User, LogOut, Download, Laptop, Sun, Moon, Radio, Link2, Users } from 'lucide-react';
 
 interface NavbarProps {
   activeUser: UserProfile;
@@ -10,6 +10,8 @@ interface NavbarProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
   onOpenInstallModal?: () => void;
+  theme?: 'light' | 'dark';
+  onToggleTheme?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -20,6 +22,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onTabChange,
   onOpenInstallModal,
+  theme = 'light',
+  onToggleTheme,
 }) => {
   const isTeacher = activeUser.role === 'teacher' && isTeacherAuthenticated;
 
@@ -37,8 +41,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-bold text-lg tracking-tight">FormativeIQ</span>
-                <span className="bg-blue-500/20 text-blue-300 text-[11px] px-2 py-0.5 rounded-full font-semibold border border-blue-500/30">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-blue-400 to-indigo-300 bg-clip-text text-transparent">
+                    EduTN43
+                  </span>
+                  <span className="text-slate-600 font-normal">/</span>
+                  <span className="font-bold text-lg tracking-tight text-white">Formative IQ</span>
+                </div>
+                <span className="hidden sm:inline-flex bg-blue-500/20 text-blue-300 text-[11px] px-2 py-0.5 rounded-full font-semibold border border-blue-500/30">
                   Sciences Faculty Hub
                 </span>
               </div>
@@ -75,6 +85,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                   + Create Formative
                 </button>
                 <button
+                  onClick={() => onTabChange('live_monitor')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    activeTab === 'live_monitor'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-emerald-400 hover:bg-emerald-600/20'
+                  }`}
+                  title="Real-time writing monitor & proctoring"
+                >
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span>Live Proctor</span>
+                </button>
+                <button
                   onClick={() => onTabChange('student_works')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
                     activeTab === 'student_works'
@@ -84,6 +109,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
                   All Student Works
+                </button>
+                <button
+                  onClick={() => onTabChange('student_evidence_manager')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    activeTab === 'student_evidence_manager'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-blue-300 hover:bg-blue-600/20'
+                  }`}
+                  title="Manage individual student formative evidence links for Toddle"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span>Evidence Links</span>
                 </button>
                 <button
                   onClick={() => onTabChange('analytics')}
@@ -134,6 +171,28 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Access Control Controls */}
           <div className="flex items-center gap-2">
+            {/* Daylight / Dark Mode Toggle */}
+            {onToggleTheme && (
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
+                title={theme === 'dark' ? 'Switch to Daylight Mode (Light theme)' : 'Switch to Dark Mode (Midnight theme)'}
+              >
+                {theme === 'dark' ? (
+                  <>
+                    <Sun className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="hidden sm:inline">Daylight</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-3.5 h-3.5 text-indigo-300" />
+                    <span className="hidden sm:inline">Dark</span>
+                  </>
+                )}
+              </button>
+            )}
+
             {/* Install Desktop App Trigger */}
             {onOpenInstallModal && (
               <button
