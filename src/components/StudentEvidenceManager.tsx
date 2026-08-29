@@ -76,13 +76,23 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
     const unsubStudents = StorageService.subscribeToStudents((list) => setStudents(list));
     const unsubSubmissions = StorageService.subscribeToSubmissions((subs) => setSubmissions(subs));
     const unsubAssessments = StorageService.subscribeToAssessments((ass) => setAssessments(ass));
+    const unsubDomain = StorageService.subscribeToDomainConfig((dom) => {
+      setCustomDomainInput(dom);
+    });
 
     return () => {
       unsubStudents();
       unsubSubmissions();
       unsubAssessments();
+      unsubDomain();
     };
   }, []);
+
+  // Check if active domain is an internal preview
+  const isInternalOrigin = useMemo(() => {
+    const currentBase = StorageService.getCustomBaseDomain();
+    return StorageService.isAiStudioOrigin(currentBase);
+  }, [customDomainInput]);
 
   // Class list for dropdown
   const classList = useMemo(() => {
@@ -146,6 +156,17 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
 
   // Copy Link action
   const handleCopyLink = (student: StudentRecord) => {
+    const currentBase = StorageService.getCustomBaseDomain();
+    // If still pointing to an internal AI Studio dev preview, alert the user to configure Vercel URL
+    if (StorageService.isAiStudioOrigin(currentBase)) {
+      setNotificationMsg({
+        type: 'error',
+        text: 'Please configure your Vercel URL first so the copied link opens in Toddle without a 403 error.',
+      });
+      setShowDomainModal(true);
+      return;
+    }
+
     const url = StorageService.getStudentEvidenceUrl(student.evidenceToken);
     navigator.clipboard.writeText(url);
     setCopiedStudentId(student.id);
@@ -498,23 +519,59 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
         </div>
       </div>
 
+      {/* Vercel Domain Alert Banner if in AI Studio / Dev Environment */}
+      {isInternalOrigin && (
+        <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-blue-500/10 border-2 border-amber-400/40 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-lg flex-shrink-0 shadow-xs">
+              ⚠️
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-slate-900">
+                Action Required: Enter Your Vercel URL for Toddle Links
+              </h4>
+              <p className="text-xs text-slate-600 leading-relaxed max-w-2xl">
+                You are currently inside the Google AI Studio editor preview. Links with <code className="bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded font-mono text-[11px]">ais-dev-*.run.app</code> are protected by Google authorization and will show a <span className="font-semibold text-rose-600">403 Forbidden</span> error in external browsers or Toddle.
+                Please enter your live <strong>Vercel App URL</strong> so all "Copy Link" buttons generate working public Toddle links!
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setCustomDomainInput(StorageService.getCustomBaseDomain());
+              setShowDomainModal(true);
+            }}
+            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex-shrink-0 flex items-center gap-2"
+          >
+            <Link2 className="w-4 h-4" />
+            <span>Enter Vercel URL Now</span>
+          </button>
+        </div>
+      )}
+
       {/* Public Evidence Domain Configuration Bar */}
       <div className="bg-slate-900 text-slate-200 rounded-2xl px-5 py-3.5 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
         <div className="flex items-center gap-2.5">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className={`w-2.5 h-2.5 rounded-full ${isInternalOrigin ? 'bg-amber-400' : 'bg-emerald-400'} animate-pulse`} />
           <span className="text-xs font-bold text-slate-400">Active Public Link Host:</span>
-          <code className="text-xs text-blue-300 font-mono font-semibold bg-slate-800 px-2 py-0.5 rounded-md">
+          <code className={`text-xs font-mono font-semibold px-2.5 py-1 rounded-md ${isInternalOrigin ? 'bg-amber-950/80 text-amber-300 border border-amber-800/60' : 'bg-slate-800 text-blue-300'}`}>
             {StorageService.getCustomBaseDomain() || (typeof window !== 'undefined' ? window.location.origin : 'Current Host')}
           </code>
+          {isInternalOrigin && (
+            <span className="text-[11px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-md font-medium border border-amber-500/30">
+              Dev Sandbox
+            </span>
+          )}
         </div>
         <button
           onClick={() => {
             setCustomDomainInput(StorageService.getCustomBaseDomain());
             setShowDomainModal(true);
           }}
-          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5"
+          className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5"
         >
-          <span>Configure Public School Domain</span>
+          <Link2 className="w-3.5 h-3.5" />
+          <span>{isInternalOrigin ? 'Set Vercel Domain' : 'Configure Public Domain'}</span>
         </button>
       </div>
 
@@ -928,69 +985,71 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
           <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-5">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <Link2 className="w-4 h-4" />
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Link2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900">Public School Domain Setting</h3>
-                  <p className="text-xs text-slate-500">Configure the public URL used when copying evidence links</p>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900">Set Production Vercel App Domain</h3>
+                  <p className="text-xs text-slate-500">Configure the public domain used for Toddle Evidence links</p>
                 </div>
               </div>
               <button
                 onClick={() => setShowDomainModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
-                StorageService.setCustomBaseDomain(customDomainInput);
+                await StorageService.setCustomBaseDomain(customDomainInput);
                 setShowDomainModal(false);
                 setNotificationMsg({
                   type: 'success',
                   text: customDomainInput.trim()
                     ? `Public evidence domain saved: ${StorageService.getCustomBaseDomain()}`
-                    : 'Evidence links reset to active app origin.',
+                    : 'Evidence links reset to active host.',
                 });
                 setTimeout(() => setNotificationMsg(null), 3500);
               }}
               className="space-y-4 text-xs"
             >
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Public Domain / App URL:</label>
+              <div className="space-y-2">
+                <label className="font-bold text-slate-800 block">
+                  Your Vercel Production URL or Custom Domain:
+                </label>
                 <input
                   type="text"
-                  placeholder="https://formative.myschool.edu or https://your-cloud-run-domain"
+                  placeholder="https://your-formative-app.vercel.app"
                   value={customDomainInput}
                   onChange={(e) => setCustomDomainInput(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono text-xs"
+                  className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono text-xs font-medium"
                 />
-                <p className="text-[11px] text-slate-500">
-                  Leave blank to automatically use the current browser domain (<code>{typeof window !== 'undefined' ? window.location.origin : ''}</code>).
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Enter your deployed Vercel domain (e.g. <code>https://my-school-formatives.vercel.app</code>). All "Copy Link" buttons will automatically use this URL so students and Toddle can open links directly without any login requirement.
                 </p>
               </div>
 
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
-                <span className="font-bold text-slate-700 block">Link Preview Example:</span>
-                <code className="text-[11px] text-blue-600 font-mono block break-all">
-                  {(customDomainInput.trim() || (typeof window !== 'undefined' ? window.location.origin : 'https://example.com')).replace(/\/+$/, '')}/evidence/eMYP4_8496_jdd
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+                <span className="font-bold text-slate-700 block text-[11px]">Link Preview Example:</span>
+                <code className="text-xs text-blue-600 font-mono font-semibold block break-all">
+                  {(customDomainInput.trim() || 'https://your-app.vercel.app').replace(/\/+$/, '')}/?evidence=eMYP4_8496_jdd
                 </code>
               </div>
 
               <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     setCustomDomainInput('');
-                    StorageService.setCustomBaseDomain('');
+                    await StorageService.setCustomBaseDomain('');
                     setShowDomainModal(false);
                     setNotificationMsg({
                       type: 'success',
-                      text: 'Reset to default active origin.',
+                      text: 'Domain reset to default host.',
                     });
                     setTimeout(() => setNotificationMsg(null), 3000);
                   }}
@@ -1008,9 +1067,9 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-colors"
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-colors"
                   >
-                    Save Domain
+                    Save Vercel Domain
                   </button>
                 </div>
               </div>

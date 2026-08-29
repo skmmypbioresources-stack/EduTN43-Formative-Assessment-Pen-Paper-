@@ -467,11 +467,25 @@ export class StorageService {
   // ==========================================
 
   /**
+   * Checks if a given origin (or current window origin) is an internal AI Studio developer preview.
+   */
+  static isAiStudioOrigin(origin?: string): boolean {
+    const check = origin || (typeof window !== 'undefined' ? window.location.origin : '');
+    return (
+      check.includes('ais-dev-') ||
+      check.includes('ais-pre-') ||
+      check.includes('aistudio.google.com') ||
+      check.includes('localhost') ||
+      check.includes('127.0.0.1')
+    );
+  }
+
+  /**
    * Returns the configured public base domain for student evidence links.
    * Priority:
-   * 1. Teacher-configured custom public domain from localStorage
+   * 1. Teacher-configured custom public domain (from Firestore / localStorage)
    * 2. VITE_PUBLIC_APP_URL environment variable
-   * 3. Current active window.location.origin
+   * 3. Current active window.location.origin (if already running on Vercel or custom domain)
    */
   static getCustomBaseDomain(): string {
     try {
@@ -491,27 +505,63 @@ export class StorageService {
     }
 
     if (typeof window !== 'undefined' && window.location && window.location.origin) {
-      return window.location.origin;
+      return window.location.origin.replace(/\/+$/, '');
     }
 
     return '';
   }
 
   /**
-   * Sets or clears the teacher-configured custom public domain.
+   * Sets or clears the teacher-configured custom public domain (saves to localStorage and Firestore).
    */
-  static setCustomBaseDomain(domain: string) {
-    try {
-      if (domain && domain.trim()) {
-        let clean = domain.trim();
-        if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
-          clean = `https://${clean}`;
-        }
-        localStorage.setItem('curric_public_base_domain', clean.replace(/\/+$/, ''));
-      } else {
-        localStorage.removeItem('curric_public_base_domain');
+  static async setCustomBaseDomain(domain: string): Promise<void> {
+    let clean = '';
+    if (domain && domain.trim()) {
+      clean = domain.trim();
+      if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+        clean = `https://${clean}`;
       }
-    } catch {}
+      clean = clean.replace(/\/+$/, '');
+      try {
+        localStorage.setItem('curric_public_base_domain', clean);
+      } catch {}
+    } else {
+      try {
+        localStorage.removeItem('curric_public_base_domain');
+      } catch {}
+    }
+
+    // Save to Firestore app settings so all tabs and views get the domain immediately
+    try {
+      const docRef = doc(db, 'settings', 'domain_config');
+      await setDoc(docRef, { customBaseDomain: clean, updatedAt: new Date().toISOString() }, { merge: true });
+    } catch (e) {
+      console.warn('Firestore setCustomBaseDomain warning:', e);
+    }
+  }
+
+  /**
+   * Subscribes to real-time domain config changes in Firestore.
+   */
+  static subscribeToDomainConfig(callback: (domain: string) => void): () => void {
+    try {
+      const docRef = doc(db, 'settings', 'domain_config');
+      const unsubscribe = onSnapshot(docRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          const remoteDomain = (data?.customBaseDomain as string) || '';
+          if (remoteDomain) {
+            try {
+              localStorage.setItem('curric_public_base_domain', remoteDomain);
+            } catch {}
+            callback(remoteDomain);
+          }
+        }
+      });
+      return unsubscribe;
+    } catch (e) {
+      return () => {};
+    }
   }
 
   /**
@@ -543,9 +593,9 @@ export class StorageService {
     const base = this.getCustomBaseDomain();
     const cleanToken = encodeURIComponent(token.trim());
     if (base) {
-      return `${base}/evidence/${cleanToken}`;
+      return `${base}/?evidence=${cleanToken}`;
     }
-    return `/evidence/${cleanToken}`;
+    return `/?evidence=${cleanToken}`;
   }
 
   /**
