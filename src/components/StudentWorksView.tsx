@@ -7,6 +7,7 @@ import {
   ALL_SUBJECTS,
 } from '../types';
 import { ReportGenerator } from '../services/reportGenerator';
+import { StorageService } from '../services/storageService';
 import {
   FileSpreadsheet,
   Download,
@@ -78,26 +79,8 @@ export const StudentWorksView: React.FC<StudentWorksViewProps> = ({
 
   // Dynamic Class list
   const classList = useMemo(() => {
-    const fromSubs = submissions.map((s) => s.classSection).filter(Boolean);
-    const fromAss = assessments.map((a) => a.blueprint.classSection).filter(Boolean);
-    const standard = [
-      'Grade 9A',
-      'Grade 9B',
-      'Grade 10A',
-      'Grade 10B',
-      'MYP 1',
-      'MYP 2',
-      'MYP 3',
-      'MYP 4',
-      'MYP 5',
-      'IGCSE Year 10',
-      'IGCSE Year 11',
-      'DP 1',
-      'DP 2',
-    ];
-    const merged = Array.from(new Set([...fromSubs, ...fromAss, ...standard]));
-    return merged.sort();
-  }, [submissions, assessments]);
+    return ['FM4', 'FM5', 'MYP 2 Science', 'MYP 4 Bio', 'MYP 5 Bio'];
+  }, []);
 
   // Dynamic Student names list
   const studentList = useMemo(() => {
@@ -115,7 +98,8 @@ export const StudentWorksView: React.FC<StudentWorksViewProps> = ({
   const filteredSubmissions = useMemo(() => {
     return submissions.filter((sub) => {
       if (selectedYear !== 'All' && sub.academicYear && sub.academicYear !== selectedYear) return false;
-      if (selectedClass && selectedClass !== 'All' && sub.classSection !== selectedClass) return false;
+      const normClass = StorageService.normalizeClassSection(sub.classSection);
+      if (selectedClass && selectedClass !== 'All' && normClass !== selectedClass) return false;
 
       if (selectedSubject && selectedSubject !== 'All') {
         const ass = assessments.find((a) => a.id === sub.formativeId);
@@ -129,7 +113,7 @@ export const StudentWorksView: React.FC<StudentWorksViewProps> = ({
       if (searchName.trim()) {
         const q = searchName.toLowerCase();
         const matchName = sub.studentName?.toLowerCase().includes(q);
-        const matchClass = sub.classSection?.toLowerCase().includes(q);
+        const matchClass = sub.classSection?.toLowerCase().includes(q) || normClass.toLowerCase().includes(q);
         const matchTopic = sub.topic?.toLowerCase().includes(q);
         const ass = assessments.find((a) => a.id === sub.formativeId);
         const matchTitle = ass?.blueprint.title?.toLowerCase().includes(q);

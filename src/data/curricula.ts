@@ -13,14 +13,14 @@ export const CURRICULA: Record<CurriculumType, CurriculumConfig> = {
     id: 'IBMYP',
     name: 'IB Middle Years Programme (IBMYP)',
     description: 'Sciences assessment framework with Criteria A, B, C, D (Levels 0-8 for MYP 1-3; Mark-based for MYP 4-5)',
-    yearGroups: ['MYP 1', 'MYP 2', 'MYP 3', 'MYP 4', 'MYP 5'],
+    yearGroups: ['MYP 2 Science', 'MYP 4 Bio', 'MYP 5 Bio', 'MYP 1', 'MYP 3'],
     subjects: ALL_SUBJECTS,
   },
   IGCSE: {
     id: 'IGCSE',
     name: 'Cambridge IGCSE Sciences',
     description: 'Rigorous 3-section formative structure (15 MCQs + 5 Structured + 5 Data-Based Questions)',
-    yearGroups: ['FM1', 'FM2', 'FM3', 'FM4', 'FM5'],
+    yearGroups: ['FM4', 'FM5', 'FM1', 'FM2', 'FM3'],
     subjects: ALL_SUBJECTS,
   },
   IBDP: {

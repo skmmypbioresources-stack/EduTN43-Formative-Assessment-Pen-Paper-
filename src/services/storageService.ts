@@ -19,7 +19,7 @@ export const DEFAULT_TEACHER: UserProfile = {
   name: 'Dr. Sarah Jenkins',
   email: 'sjenkins@school.edu',
   role: 'teacher',
-  classSections: ['MYP 2', 'Grade 9A', 'Grade 9B', 'Grade 10-Bio', 'FM3-Sci', 'DP1-Bio'],
+  classSections: ['MYP 2 Science', 'MYP 4 Bio', 'MYP 5 Bio', 'FM4', 'FM5'],
   subjects: ['Biology', 'Chemistry', 'Physics', 'Environmental Systems', 'Integrated Sciences'],
 };
 
@@ -28,7 +28,7 @@ export const DEFAULT_STUDENT: UserProfile = {
   name: 'Student',
   email: 'student@school.edu',
   role: 'student',
-  classSections: ['MYP 2', 'Grade 9A'],
+  classSections: ['MYP 2 Science', 'MYP 4 Bio', 'MYP 5 Bio'],
 };
 
 export class StorageService {
@@ -37,6 +37,67 @@ export class StorageService {
   private static liveSessionsCache: Record<string, LiveStudentSession> = {};
   private static studentsCache: StudentRecord[] = [];
   private static initialized = false;
+
+  /**
+   * Normalizes any class name to standard canonical names:
+   * 'MYP 4 Bio', 'MYP 2 Science', 'MYP 5 Bio', 'FM4', 'FM5', etc.
+   */
+  static normalizeClassSection(raw?: string): string {
+    if (!raw) return 'MYP 4 Bio';
+    const c = raw.trim();
+    // Strip non-alphanumeric characters for safe matching of 'MYP-2-C', 'MYP/4/C', etc.
+    const clean = c.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // Grade 9 / MYP 4 variants
+    if (
+      clean.includes('myp4') ||
+      clean.includes('grade9') ||
+      clean === '9a' ||
+      clean === '9b' ||
+      clean === '9c' ||
+      clean === '9' ||
+      clean.includes('myp4bio')
+    ) {
+      return 'MYP 4 Bio';
+    }
+
+    // Grade 7 / MYP 2 variants
+    if (
+      clean.includes('myp2') ||
+      clean.includes('grade7') ||
+      clean === '7a' ||
+      clean === '7b' ||
+      clean === '7c' ||
+      clean === '7' ||
+      clean.includes('myp2science') ||
+      clean.includes('myp2sci')
+    ) {
+      return 'MYP 2 Science';
+    }
+
+    // Grade 10 / MYP 5 variants
+    if (
+      clean.includes('myp5') ||
+      clean.includes('grade10') ||
+      clean === '10a' ||
+      clean === '10b' ||
+      clean === '10c' ||
+      clean === '10' ||
+      clean.includes('myp5bio')
+    ) {
+      return 'MYP 5 Bio';
+    }
+
+    if (clean === 'fm4' || clean.includes('fm4')) return 'FM4';
+    if (clean === 'fm5' || clean.includes('fm5')) return 'FM5';
+    if (clean === 'fm1' || clean === 'fm2' || clean === 'fm3') return clean.toUpperCase();
+    if (clean.includes('myp1')) return 'MYP 1';
+    if (clean.includes('myp3')) return 'MYP 3';
+    if (clean.includes('ibdp1') || clean.includes('dp1')) return 'IBDP1';
+    if (clean.includes('ibdp2') || clean.includes('dp2')) return 'IBDP2';
+
+    return 'MYP 4 Bio';
+  }
 
   static init() {
     if (this.initialized) return;
@@ -57,38 +118,47 @@ export class StorageService {
         this.liveSessionsCache = JSON.parse(localLiveSessions);
       }
       const localStudents = localStorage.getItem(STORAGE_KEYS.STUDENTS);
-      if (localStudents) {
-        this.studentsCache = JSON.parse(localStudents);
-      }
 
-      // Merge seed roster if any students are missing
-      const existingMap = new Map<string, StudentRecord>();
-      this.studentsCache.forEach((s) => {
-        if (s.studentId) existingMap.set(s.studentId.trim(), s);
-        if (s.id) existingMap.set(s.id.trim(), s);
-      });
+      // Rebuild clean student roster from INITIAL_STUDENT_ROSTER
+      const cleanStudents: StudentRecord[] = [];
+      const seenIds = new Set<string>();
 
-      let addedAny = false;
       INITIAL_STUDENT_ROSTER.forEach((raw) => {
-        if (!existingMap.has(raw.studentId) && !existingMap.has(raw.id)) {
-          const newRec: StudentRecord = {
-            ...raw,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          };
-          this.studentsCache.push(newRec);
-          existingMap.set(newRec.studentId, newRec);
-          existingMap.set(newRec.id, newRec);
-          addedAny = true;
-        }
+        const id = raw.studentId.trim();
+        seenIds.add(id);
+        cleanStudents.push({
+          ...raw,
+          id,
+          studentId: id,
+          classSection: this.normalizeClassSection(raw.classSection),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
       });
 
-      if (addedAny) {
-        this.studentsCache.sort((a, b) => a.name.localeCompare(b.name));
+      if (localStudents) {
         try {
-          localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(this.studentsCache));
+          const parsed = JSON.parse(localStudents) as StudentRecord[];
+          parsed.forEach((s) => {
+            const sid = s.studentId?.trim();
+            if (sid && !seenIds.has(sid) && s.name) {
+              seenIds.add(sid);
+              cleanStudents.push({
+                ...s,
+                id: sid,
+                studentId: sid,
+                classSection: this.normalizeClassSection(s.classSection),
+              });
+            }
+          });
         } catch {}
       }
+
+      cleanStudents.sort((a, b) => a.name.localeCompare(b.name));
+      this.studentsCache = cleanStudents;
+      try {
+        localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(cleanStudents));
+      } catch {}
 
       if (!localStorage.getItem(STORAGE_KEYS.ACTIVE_USER)) {
         localStorage.setItem(STORAGE_KEYS.ACTIVE_USER, JSON.stringify(DEFAULT_STUDENT));
@@ -609,9 +679,61 @@ export class StorageService {
         colRef,
         (snapshot) => {
           const items: StudentRecord[] = [];
+          const seenIds = new Set<string>();
+
           snapshot.forEach((d) => {
-            items.push(d.data() as StudentRecord);
+            const data = d.data() as StudentRecord;
+            const sid = (data.studentId || d.id).trim();
+            const normClass = this.normalizeClassSection(data.classSection);
+            
+            // Check if document needs sanitizing
+            if (normClass !== data.classSection || data.id !== sid || !data.studentId) {
+              data.classSection = normClass;
+              data.id = sid;
+              data.studentId = sid;
+              if (normClass === 'MYP 4 Bio' || normClass === 'MYP 5 Bio') {
+                data.subject = 'Biology';
+              } else if (normClass === 'MYP 2 Science') {
+                data.subject = 'Science';
+              }
+              try {
+                const docRef = doc(db, 'students', d.id);
+                setDoc(docRef, data, { merge: true });
+              } catch {}
+            }
+
+            if (sid && !seenIds.has(sid)) {
+              seenIds.add(sid);
+              items.push({
+                ...data,
+                id: sid,
+                studentId: sid,
+                classSection: normClass,
+              });
+            }
           });
+
+          // Ensure all official seeds exist
+          INITIAL_STUDENT_ROSTER.forEach((seed) => {
+            const sid = seed.studentId.trim();
+            if (!seenIds.has(sid)) {
+              const fullRec: StudentRecord = {
+                ...seed,
+                id: sid,
+                studentId: sid,
+                classSection: this.normalizeClassSection(seed.classSection),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              };
+              seenIds.add(sid);
+              items.push(fullRec);
+              try {
+                const docRef = doc(db, 'students', sid);
+                setDoc(docRef, fullRec, { merge: true });
+              } catch {}
+            }
+          });
+
           // Sort alphabetically by name
           items.sort((a, b) => a.name.localeCompare(b.name));
           this.studentsCache = items;
@@ -927,18 +1049,24 @@ export class StorageService {
     return Array.from(teachers);
   }
 
-  // Get distinct list of classes from blueprints
+  // Get distinct list of classes from blueprints and students
   static getClassList(): string[] {
     const assessments = this.getAssessments();
+    const students = this.getStudents();
     const classes = new Set<string>();
-    classes.add('Grade 9A');
-    classes.add('Grade 9B');
-    classes.add('Grade 10-Bio');
-    classes.add('FM3-Sci');
-    classes.add('DP1-Bio');
+    classes.add('MYP 2 Science');
+    classes.add('MYP 4 Bio');
+    classes.add('MYP 5 Bio');
+    classes.add('FM4');
+    classes.add('FM5');
     assessments.forEach((a) => {
       if (a.blueprint?.classSection?.trim()) {
-        classes.add(a.blueprint.classSection.trim());
+        classes.add(this.normalizeClassSection(a.blueprint.classSection.trim()));
+      }
+    });
+    students.forEach((s) => {
+      if (s.classSection?.trim()) {
+        classes.add(this.normalizeClassSection(s.classSection.trim()));
       }
     });
     return Array.from(classes);

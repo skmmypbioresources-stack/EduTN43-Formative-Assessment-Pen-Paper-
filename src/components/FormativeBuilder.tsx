@@ -141,7 +141,7 @@ export const FormativeBuilder: React.FC<FormativeBuilderProps> = ({
   );
 
   // MYP Mode check
-  const isMYP1to3 = yearGroup === 'MYP 1' || yearGroup === 'MYP 2' || yearGroup === 'MYP 3';
+  const isMYP1to3 = yearGroup === 'MYP 1' || yearGroup === 'MYP 2' || yearGroup === 'MYP 3' || yearGroup === 'MYP 2 Science';
 
   // Toggle strand
   const toggleStrand = (strandId: string) => {

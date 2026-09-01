@@ -1,9 +1,9 @@
 export type CurriculumType = 'IBMYP' | 'IGCSE' | 'IBDP';
 
-export type MYPYear = 'MYP 1' | 'MYP 2' | 'MYP 3' | 'MYP 4' | 'MYP 5';
+export type MYPYear = 'MYP 2 Science' | 'MYP 4 Bio' | 'MYP 5 Bio' | 'MYP 1' | 'MYP 2' | 'MYP 3' | 'MYP 4' | 'MYP 5';
 export type IGCSEClass = 'FM1' | 'FM2' | 'FM3' | 'FM4' | 'FM5';
 export type IBDPClass = 'IBDP1' | 'IBDP2';
-export type YearGroup = MYPYear | IGCSEClass | IBDPClass;
+export type YearGroup = MYPYear | IGCSEClass | IBDPClass | string;
 
 export type Subject = 'Biology' | 'Chemistry' | 'Physics' | 'Environmental Systems' | 'Integrated Sciences';
 

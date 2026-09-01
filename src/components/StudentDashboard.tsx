@@ -68,7 +68,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [targetAssessmentForStart, setTargetAssessmentForStart] = useState<FormativeAssessment | null>(null);
   const [isRedoAttempt, setIsRedoAttempt] = useState<boolean>(false);
   const [studentFullName, setStudentFullName] = useState<string>('');
-  const [studentClass, setStudentClass] = useState<string>('MYP 2');
+  const [studentClass, setStudentClass] = useState<string>('MYP 4 Bio');
   const [studentCurriculum, setStudentCurriculum] = useState<CurriculumType>('IBMYP');
   const [studentAcademicYear, setStudentAcademicYear] = useState<string>(DEFAULT_ACADEMIC_YEAR);
 
@@ -79,11 +79,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   // Extract available classes dynamically
   const classOptions = useMemo(() => {
-    const fromAssessments = publishedAssessments.map((a) => a.blueprint.classSection).filter(Boolean);
-    const standard = ['Grade 9A', 'Grade 9B', 'Grade 10A', 'Grade 10B', 'MYP 1', 'MYP 2', 'MYP 3', 'MYP 4', 'MYP 5', 'IGCSE Year 10', 'IGCSE Year 11', 'DP 1', 'DP 2'];
-    const merged = Array.from(new Set([...fromAssessments, ...standard]));
-    return merged.sort();
-  }, [publishedAssessments]);
+    return ['FM4', 'FM5', 'MYP 2 Science', 'MYP 4 Bio', 'MYP 5 Bio'];
+  }, []);
 
   // Helper to check if student has submitted an assessment
   const getStudentSubmission = (assessmentId: string): Submission | undefined => {

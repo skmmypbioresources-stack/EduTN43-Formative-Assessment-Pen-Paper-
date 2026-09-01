@@ -64,12 +64,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   // Extract unique classes
-  const classSections = Array.from(
-    new Set(assessments.map((a) => a.blueprint.classSection).filter(Boolean))
-  );
+  const classSections = [
+    'FM4',
+    'FM5',
+    'MYP 2 Science',
+    'MYP 4 Bio',
+    'MYP 5 Bio',
+  ];
 
   const filteredAssessments = assessments.filter((a) => {
-    if (selectedSection !== 'All' && a.blueprint.classSection !== selectedSection) return false;
+    const normClass = StorageService.normalizeClassSection(a.blueprint.classSection);
+    if (selectedSection !== 'All' && normClass !== selectedSection) return false;
     if (selectedSubject !== 'All' && a.blueprint.subject !== selectedSubject) return false;
     return true;
   });

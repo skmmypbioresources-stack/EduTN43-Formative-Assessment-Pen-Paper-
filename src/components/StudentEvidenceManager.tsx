@@ -59,7 +59,7 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
   const [formData, setFormData] = useState({
     studentId: '',
     name: '',
-    classSection: 'MYP 5',
+    classSection: 'MYP 4 Bio',
     section: 'Biology',
     subject: 'Biology',
     email: '',
@@ -96,18 +96,8 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
 
   // Class list for dropdown
   const classList = useMemo(() => {
-    const set = new Set<string>();
-    students.forEach((s) => {
-      if (s.classSection) set.add(s.classSection);
-    });
-    set.add('MYP 5');
-    set.add('MYP 4');
-    set.add('Grade 9A');
-    set.add('Grade 9B');
-    set.add('Grade 10-Bio');
-    set.add('DP1-Bio');
-    return Array.from(set);
-  }, [students]);
+    return ['FM4', 'FM5', 'MYP 2 Science', 'MYP 4 Bio', 'MYP 5 Bio'];
+  }, []);
 
   // Map of studentId / name -> submissions count
   const studentSubmissionCounts = useMemo(() => {
@@ -137,7 +127,8 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
   // Filtered Students
   const filteredStudents = useMemo(() => {
     return students.filter((s) => {
-      if (selectedClass !== 'All' && s.classSection !== selectedClass) {
+      const normClass = StorageService.normalizeClassSection(s.classSection);
+      if (selectedClass !== 'All' && normClass !== selectedClass) {
         return false;
       }
       if (searchTerm.trim()) {
