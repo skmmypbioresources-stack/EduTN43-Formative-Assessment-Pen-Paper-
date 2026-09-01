@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   SUBMISSIONS: 'curric_formative_submissions_v2',
   LIVE_SESSIONS: 'curric_formative_live_sessions_v2',
   STUDENTS: 'curric_formative_students_v2',
+  DELETED_STUDENT_IDS: 'curric_deleted_student_ids_v2',
   ACTIVE_USER: 'curric_active_user_v2',
   TEACHERS_LIST: 'curric_teachers_list_v2',
   TEACHER_AUTH_SESSION: 'curric_teacher_auth_session_v2',
@@ -122,9 +123,14 @@ export class StorageService {
       // Rebuild clean student roster from INITIAL_STUDENT_ROSTER
       const cleanStudents: StudentRecord[] = [];
       const seenIds = new Set<string>();
+      const deletedIds = this.getDeletedStudentIds();
+
+      // Filter out permanently deleted IDs or known test duplicate IDs (such as 1787813177803)
+      deletedIds.add('1787813177803');
 
       INITIAL_STUDENT_ROSTER.forEach((raw) => {
         const id = raw.studentId.trim();
+        if (deletedIds.has(id) || deletedIds.has(raw.id)) return;
         seenIds.add(id);
         cleanStudents.push({
           ...raw,
@@ -141,7 +147,7 @@ export class StorageService {
           const parsed = JSON.parse(localStudents) as StudentRecord[];
           parsed.forEach((s) => {
             const sid = s.studentId?.trim();
-            if (sid && !seenIds.has(sid) && s.name) {
+            if (sid && !seenIds.has(sid) && !deletedIds.has(sid) && !deletedIds.has(s.id) && s.name) {
               seenIds.add(sid);
               cleanStudents.push({
                 ...s,
@@ -168,7 +174,25 @@ export class StorageService {
     }
   }
 
-  // Teacher Authentication Protection
+  // Deleted Student IDs Blacklist
+  static getDeletedStudentIds(): Set<string> {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.DELETED_STUDENT_IDS);
+      if (data) {
+        const arr = JSON.parse(data);
+        return new Set(Array.isArray(arr) ? arr : []);
+      }
+    } catch {}
+    return new Set<string>();
+  }
+
+  static addDeletedStudentId(id: string) {
+    try {
+      const set = this.getDeletedStudentIds();
+      set.add(id.trim());
+      localStorage.setItem(STORAGE_KEYS.DELETED_STUDENT_IDS, JSON.stringify(Array.from(set)));
+    } catch {}
+  }
   static isTeacherAuthenticated(): boolean {
     try {
       return sessionStorage.getItem(STORAGE_KEYS.TEACHER_AUTH_SESSION) === 'true';
@@ -481,6 +505,24 @@ export class StorageService {
     return this.getSubmissions()[id];
   }
 
+  static async deleteSubmission(id: string): Promise<void> {
+    this.init();
+    const subs = { ...this.getSubmissions() };
+    delete subs[id];
+    this.submissionsCache = subs;
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.SUBMISSIONS, JSON.stringify(subs));
+    } catch {}
+
+    try {
+      const docRef = doc(db, 'submissions', id);
+      await deleteDoc(docRef);
+    } catch (err) {
+      console.warn('Failed to delete submission from Firestore:', err);
+    }
+  }
+
   static async saveSubmission(submission: Submission): Promise<void> {
     this.init();
     const subs = { ...this.getSubmissions() };
@@ -680,12 +722,18 @@ export class StorageService {
         (snapshot) => {
           const items: StudentRecord[] = [];
           const seenIds = new Set<string>();
+          const deletedIds = this.getDeletedStudentIds();
 
           snapshot.forEach((d) => {
             const data = d.data() as StudentRecord;
             const sid = (data.studentId || d.id).trim();
             const normClass = this.normalizeClassSection(data.classSection);
             
+            // Skip any blacklisted or deleted student IDs
+            if (deletedIds.has(sid) || deletedIds.has(d.id)) {
+              return;
+            }
+
             // Check if document needs sanitizing
             if (normClass !== data.classSection || data.id !== sid || !data.studentId) {
               data.classSection = normClass;
@@ -713,10 +761,10 @@ export class StorageService {
             }
           });
 
-          // Ensure all official seeds exist
+          // Ensure all official seeds exist (unless blacklisted)
           INITIAL_STUDENT_ROSTER.forEach((seed) => {
             const sid = seed.studentId.trim();
-            if (!seenIds.has(sid)) {
+            if (!seenIds.has(sid) && !deletedIds.has(sid) && !deletedIds.has(seed.id)) {
               const fullRec: StudentRecord = {
                 ...seed,
                 id: sid,
@@ -976,11 +1024,14 @@ export class StorageService {
   }
 
   /**
-   * Deletes a student record.
+   * Deletes a student record and adds their identifier to the permanent deleted blacklist.
    */
   static async deleteStudent(id: string): Promise<void> {
     this.init();
-    const students = this.getStudents().filter((s) => s.id !== id && s.studentId !== id);
+    const cleanId = id.trim();
+    this.addDeletedStudentId(cleanId);
+
+    const students = this.getStudents().filter((s) => s.id !== cleanId && s.studentId !== cleanId);
     this.studentsCache = students;
 
     try {
@@ -988,8 +1039,8 @@ export class StorageService {
     } catch {}
 
     try {
-      const docRef = doc(db, 'students', id);
-      await deleteDoc(docRef);
+      const docRef1 = doc(db, 'students', cleanId);
+      await deleteDoc(docRef1);
     } catch (err) {
       console.warn('Failed to delete student from Firestore:', err);
     }

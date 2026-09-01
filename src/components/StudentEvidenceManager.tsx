@@ -53,6 +53,7 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
   const [customDomainInput, setCustomDomainInput] = useState<string>(() => StorageService.getCustomBaseDomain());
   const [editingStudent, setEditingStudent] = useState<StudentRecord | null>(null);
   const [previewingToken, setPreviewingToken] = useState<string | null>(null);
+  const [studentToDelete, setStudentToDelete] = useState<StudentRecord | null>(null);
   const [notificationMsg, setNotificationMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Single Add / Edit Form State
@@ -253,12 +254,18 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
   };
 
   // Delete Student
-  const handleDeleteStudent = async (student: StudentRecord) => {
-    if (window.confirm(`Are you sure you want to delete ${student.name}'s record? (Their past submissions will remain stored)`)) {
-      await StorageService.deleteStudent(student.id);
-      setNotificationMsg({ type: 'success', text: `Deleted ${student.name}.` });
-      setTimeout(() => setNotificationMsg(null), 3000);
-    }
+  const handleDeleteStudent = (student: StudentRecord) => {
+    setStudentToDelete(student);
+  };
+
+  const confirmDeleteStudent = async () => {
+    if (!studentToDelete) return;
+    const target = studentToDelete;
+    setStudentToDelete(null);
+    await StorageService.deleteStudent(target.id);
+    setStudents(StorageService.getStudents());
+    setNotificationMsg({ type: 'success', text: `Deleted ${target.name} (${target.studentId}).` });
+    setTimeout(() => setNotificationMsg(null), 3000);
   };
 
   // Parse CSV text
@@ -1065,6 +1072,38 @@ export const StudentEvidenceManager: React.FC<StudentEvidenceManagerProps> = ({
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* CONFIRM DELETE MODAL */}
+      {studentToDelete && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 max-w-sm w-full shadow-2xl space-y-5 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-100">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">Delete Student Record?</h3>
+              <p className="text-sm text-slate-500 mt-1">
+                Are you sure you want to remove <span className="font-semibold text-slate-800">{studentToDelete.name}</span> (ID: <span className="font-mono text-slate-700">{studentToDelete.studentId}</span>)?
+              </p>
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setStudentToDelete(null)}
+                className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteStudent}
+                className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-xs transition-colors"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}
