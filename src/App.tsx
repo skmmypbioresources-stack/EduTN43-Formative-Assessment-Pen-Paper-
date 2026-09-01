@@ -386,12 +386,6 @@ export function App() {
     return (
       <StudentEvidencePortfolioView
         token={evidenceToken}
-        onBackToPortal={() => {
-          if (window.history.pushState) {
-            window.history.pushState({}, '', '/');
-          }
-          setEvidenceToken(null);
-        }}
       />
     );
   }

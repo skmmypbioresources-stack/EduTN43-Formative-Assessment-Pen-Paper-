@@ -384,13 +384,14 @@ export const StudentEvidencePortfolioView: React.FC<StudentEvidencePortfolioView
       <div className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {onBackToPortal && (
+            {isEmbeddedPreview && onBackToPortal && (
               <button
                 onClick={onBackToPortal}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-                title="Back"
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors flex items-center gap-1.5 text-xs font-semibold"
+                title="Return to Student Evidence Manager"
               >
                 <ArrowLeft className="w-4 h-4" />
+                <span>Exit Preview</span>
               </button>
             )}
             <div className="flex items-center gap-2">
