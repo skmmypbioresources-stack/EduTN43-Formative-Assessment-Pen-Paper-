@@ -22,6 +22,7 @@ import {
   Link2,
 } from 'lucide-react';
 import { ReportGenerator } from '../services/reportGenerator';
+import { StorageService } from '../services/storageService';
 
 interface TeacherDashboardProps {
   activeTeacher: UserProfile;
